@@ -1,7 +1,6 @@
 // Global error handler — catches silent white pages
 window.addEventListener('error', (e) => {
   console.error('Global error:', e.message)
-  // If app container is empty, something went wrong — reload once
   setTimeout(() => {
     const app = document.getElementById('app')
     if (app && app.children.length === 0) {
@@ -15,7 +14,6 @@ window.addEventListener('error', (e) => {
 })
 
 window.addEventListener('unhandledrejection', (e) => {
-  // Ignore supabase lock errors — they self-recover
   if (e.reason?.message?.includes('Lock broken') ||
       e.reason?.message?.includes('lock')) {
     e.preventDefault()
@@ -34,32 +32,60 @@ import { initMobileNav } from './components/mobile-nav.js'
 const app = document.getElementById('app')
 let navEl     = null
 let contentEl = null
+let layoutBuilt = false
+
+// ── Hide mobile nav explicitly ─────────────────────────────
+function hideMobileNav() {
+  const mobileNav = document.getElementById('mobile-nav')
+  const fabCamera = document.getElementById('fab-camera')
+  const drawer    = document.getElementById('mobile-drawer')
+  if (mobileNav) mobileNav.style.display = 'none'
+  if (fabCamera) fabCamera.style.display = 'none'
+  // Don't hide drawer — it has pointer-events:none by default
+}
+
+// ── Show mobile nav (only on mobile screen size) ───────────
+function showMobileNav() {
+  if (window.innerWidth > 768) return
+  const mobileNav = document.getElementById('mobile-nav')
+  const fabCamera = document.getElementById('fab-camera')
+  if (mobileNav) mobileNav.style.display = 'block'
+  if (fabCamera) fabCamera.style.display = 'flex'
+}
 
 export async function loadPage(pageName) {
-  const fullScreen = ['auth', 'onboarding']
+  const fullScreenPages = ['auth', 'onboarding']
 
-  if (fullScreen.includes(pageName)) {
-    // Remove sidebar for full-screen pages
+  if (fullScreenPages.includes(pageName)) {
+    // Full screen pages — no sidebar, no mobile nav
     app.innerHTML = ''
+    layoutBuilt = false
     navEl     = null
     contentEl = document.createElement('div')
     contentEl.style.width = '100%'
     app.appendChild(contentEl)
+
+    // Explicitly hide mobile nav — this is the critical fix
+    hideMobileNav()
+
     const module = await import(`./pages/${pageName}.js`)
     module.render(contentEl)
     return
   }
 
-  // Ensure layout exists
-  if (!navEl || !document.body.contains(navEl)) {
+  // Normal pages — ensure layout exists
+  if (!document.querySelector('.sidebar')) {
     buildLayout()
   }
+
+  // Show mobile nav on normal pages
+  showMobileNav()
 
   contentEl.innerHTML = ''
   const module = await import(`./pages/${pageName}.js`)
   module.render(contentEl)
 
-  // Update active nav
+  // Update active nav item
   if (navEl) {
     navEl.querySelectorAll('.nav-item').forEach(el => {
       el.classList.toggle('active', el.dataset.path === window.location.pathname)
@@ -67,20 +93,17 @@ export async function loadPage(pageName) {
   }
 }
 
-let layoutBuilt = false
-
 export function buildLayout() {
-  // Check if layout actually exists in DOM, not just our flag
-  const navExists = document.querySelector('.sidebar')
+  // Check if layout actually exists in DOM
+  const navExists     = document.querySelector('.sidebar')
   const contentExists = document.querySelector('.main-content')
 
   if (navExists && contentExists) {
-    // Layout exists — just refresh nav data
-    renderNav(navEl || navExists)
+    // Already built — just refresh nav
+    if (navEl) renderNav(navEl)
     return
   }
 
-  // Build fresh
   layoutBuilt = true
   app.innerHTML = ''
 
@@ -92,6 +115,7 @@ export function buildLayout() {
   contentEl.className = 'main-content'
   app.appendChild(contentEl)
 
+  // Init mobile nav once — it starts hidden via inline style
   if (!document.getElementById('mobile-nav')) {
     initMobileNav()
   }
@@ -136,7 +160,7 @@ async function loadUserData(user) {
   appStore.getState().setCurrentStore(stores[0])
   buildLayout()
 
-  // Replace /auth in history so back button doesn't go back to auth
+  // Replace /auth in history so back button doesn't return to auth
   if (window.location.pathname === '/auth') {
     window.history.replaceState({}, '', '/dashboard')
   }
@@ -145,25 +169,25 @@ async function loadUserData(user) {
 }
 
 async function init() {
-  // Apply saved mode
+  // Apply saved mode before anything renders
   if (localStorage.getItem('storeos-mode') === 'lite') {
     document.body.classList.add('lite-mode')
   }
 
-  // Wait for auth to stabilize — fixes lock race condition
+  // Wait for auth to stabilize — fixes Supabase lock race condition
   await new Promise(r => setTimeout(r, 100))
 
   let session = null
   try {
     const { data } = await supabase.auth.getSession()
     session = data?.session
-  } catch(e) {
-    // Lock error — retry once
+  } catch (e) {
+    // Lock error — retry once after short delay
     await new Promise(r => setTimeout(r, 500))
     try {
       const { data } = await supabase.auth.getSession()
       session = data?.session
-    } catch(e2) {
+    } catch (e2) {
       console.warn('Auth session error:', e2.message)
     }
   }
@@ -179,10 +203,10 @@ async function init() {
   await loadUserData(session.user)
 }
 
-// Auth state listener
+// Auth state change listener
 supabase.auth.onAuthStateChange(async (event, session) => {
   if (event === 'SIGNED_IN' && session) {
-    // Only load if user wasn't already set to avoid double-loading
+    // Only load if user wasn't already set — avoid double-loading
     const currentUser = appStore.getState().user
     if (!currentUser || currentUser.id !== session.user.id) {
       appStore.getState().setUser(session.user)
@@ -193,6 +217,8 @@ supabase.auth.onAuthStateChange(async (event, session) => {
     appStore.getState().setUser(null)
     appStore.getState().setStores([])
     appStore.getState().setCurrentStore(null)
+    // Hide mobile nav before navigating to auth
+    hideMobileNav()
     buildFullScreen()
     navigate('/auth')
   }

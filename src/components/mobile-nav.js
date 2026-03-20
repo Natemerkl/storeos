@@ -4,45 +4,49 @@ import { Icons, renderIcon } from './icons.js'
 import { supabase } from '../supabase.js'
 
 const MOBILE_ITEMS = [
-  { path:'/dashboard',    icon:'dashboard',    label:'Home'    },
-  { path:'/inventory',    icon:'inventory',    label:'Stock'   },
-  { path:'/transactions', icon:'transactions', label:'Sales'   },
-  { path:'/credits',      icon:'credits',      label:'Credits' },
-  { path:'/accounting',   icon:'accounting',   label:'Finance' },
+  { path: '/dashboard',    icon: 'dashboard',    label: 'Home'    },
+  { path: '/inventory',    icon: 'inventory',    label: 'Stock'   },
+  { path: '/transactions', icon: 'transactions', label: 'Sales'   },
+  { path: '/credits',      icon: 'credits',      label: 'Credits' },
+  { path: '/accounting',   icon: 'accounting',   label: 'Finance' },
 ]
 
 const ALL_NAV_ITEMS = [
-  { path:'/dashboard',    icon:'dashboard',    label:'Dashboard'       },
-  { path:'/sales',        icon:'store',        label:'Point of Sale'   },
-  { path:'/inventory',    icon:'inventory',    label:'Inventory'       },
-  { path:'/transactions', icon:'transactions', label:'Transactions'    },
-  { path:'/expenses',     icon:'expenses',     label:'Expenses'        },
-  { path:'/credits',      icon:'credits',      label:'Credits & Debts' },
-  { path:'/transfers',    icon:'transfers',    label:'Cash Transfers'  },
-  { path:'/accounting',   icon:'accounting',   label:'Accounting'      },
-  { path:'/ocr',          icon:'scan',         label:'Scan Receipt'    },
-  { path:'/reports',      icon:'reports',      label:'Reports'         },
-  { path:'/settings',     icon:'settings',     label:'Settings'        },
-  { path:'/audit',        icon:'reports',      label:'Audit Log'       },
+  { path: '/dashboard',    icon: 'dashboard',    label: 'Dashboard'       },
+  { path: '/sales',        icon: 'store',        label: 'Point of Sale'   },
+  { path: '/inventory',    icon: 'inventory',    label: 'Inventory'       },
+  { path: '/transactions', icon: 'transactions', label: 'Transactions'    },
+  { path: '/expenses',     icon: 'expenses',     label: 'Expenses'        },
+  { path: '/credits',      icon: 'credits',      label: 'Credits & Debts' },
+  { path: '/transfers',    icon: 'transfers',    label: 'Cash Transfers'  },
+  { path: '/accounting',   icon: 'accounting',   label: 'Accounting'      },
+  { path: '/ocr',          icon: 'scan',         label: 'Scan Receipt'    },
+  { path: '/reports',      icon: 'reports',      label: 'Reports'         },
+  { path: '/settings',     icon: 'settings',     label: 'Settings'        },
+  { path: '/audit',        icon: 'reports',      label: 'Audit Log'       },
 ]
 
+// Routes where mobile nav must NEVER show
 const HIDDEN_ROUTES = new Set(['/auth', '/onboarding'])
 
 export function initMobileNav() {
 
-  // ── Elements ───────────────────────────────────────────────
+  // ── Create elements ──────────────────────────────────────
   const nav = document.createElement('div')
   nav.className = 'mobile-nav'
   nav.id = 'mobile-nav'
+  // Force hidden via inline style — CSS alone isn't enough during init race
+  nav.style.display = 'none'
 
   const fab = document.createElement('button')
   fab.className = 'fab-camera'
   fab.id = 'fab-camera'
   fab.setAttribute('aria-label', 'Scan receipt')
-  fab.setAttribute('role', 'button')
   fab.innerHTML = Icons.camera?.(24) || ''
+  // Force hidden via inline style
+  fab.style.display = 'none'
 
-  // ── Drawer ─────────────────────────────────────────────────
+  // ── Drawer ───────────────────────────────────────────────
   const drawer = document.createElement('div')
   drawer.id = 'mobile-drawer'
   drawer.style.cssText = `
@@ -63,26 +67,17 @@ export function initMobileNav() {
       display:flex;flex-direction:column;
       box-shadow:-20px 0 60px rgba(0,0,0,0.25);
       overflow:hidden;
-      /* Safe area on right edge */
-      padding-right:var(--safe-right,0px);
     ">
-      <!-- Handle bar -->
-      <div style="
-        position:absolute;left:-20px;top:50%;transform:translateY(-50%);
-        width:4px;height:48px;border-radius:999px;
-        background:rgba(255,255,255,0.2);
-      "></div>
-
       <!-- Header -->
       <div style="
         display:flex;align-items:center;justify-content:space-between;
-        padding:calc(var(--safe-top,0px) + 16px) 20px 16px;
+        padding:calc(var(--safe-top,0px) + 20px) 20px 16px;
         border-bottom:1px solid rgba(255,255,255,0.07);
         flex-shrink:0;
       ">
         <div style="
           display:flex;align-items:center;gap:8px;
-          font-size:1.1rem;font-weight:700;color:#fff;letter-spacing:-0.3px;
+          font-size:1.1rem;font-weight:700;color:#fff;
         ">
           <div style="
             width:28px;height:28px;background:var(--accent);border-radius:8px;
@@ -96,8 +91,7 @@ export function initMobileNav() {
           border:1px solid rgba(255,255,255,0.1);
           display:flex;align-items:center;justify-content:center;
           color:rgba(255,255,255,0.7);cursor:pointer;
-          transition:all 0.15s;
-          touch-action:manipulation;
+          -webkit-tap-highlight-color:transparent;
         ">${renderIcon('close', 16)}</button>
       </div>
 
@@ -109,31 +103,38 @@ export function initMobileNav() {
       "></div>
 
       <!-- Nav items -->
-      <nav style="flex:1;overflow-y:auto;padding:8px 12px;
-        -webkit-overflow-scrolling:touch;" aria-label="Main navigation">
+      <nav style="
+        flex:1;overflow-y:auto;padding:8px 12px;
+        -webkit-overflow-scrolling:touch;
+      ">
         <div style="
-          font-size:10px;font-weight:700;color:rgba(255,255,255,0.28);
+          font-size:10px;font-weight:700;
+          color:rgba(255,255,255,0.28);
           letter-spacing:1.2px;text-transform:uppercase;
           padding:12px 8px 6px;
         ">Menu</div>
         ${ALL_NAV_ITEMS.map(item => `
-          <div class="drawer-nav-item" data-path="${item.path}"
-            role="button" tabindex="0"
+          <div class="drawer-nav-item"
+            data-path="${item.path}"
+            role="button"
+            tabindex="0"
             aria-label="${item.label}"
             style="
               display:flex;align-items:center;gap:10px;
-              padding:10px 10px;border-radius:10px;
-              color:rgba(255,255,255,0.58);font-size:0.9rem;font-weight:500;
+              padding:10px;border-radius:10px;
+              color:rgba(255,255,255,0.58);
+              font-size:0.9rem;font-weight:500;
               margin-bottom:2px;cursor:pointer;
               transition:background 0.15s,color 0.15s;
               min-height:44px;
-              touch-action:manipulation;
               -webkit-tap-highlight-color:transparent;
+              touch-action:manipulation;
             ">
-            <div style="width:20px;height:20px;display:flex;align-items:center;
-              justify-content:center;flex-shrink:0;">
-              ${Icons[item.icon]?.(17) || ''}
-            </div>
+            <div style="
+              width:20px;height:20px;
+              display:flex;align-items:center;justify-content:center;
+              flex-shrink:0;
+            ">${Icons[item.icon]?.(17) || ''}</div>
             <span>${item.label}</span>
           </div>
         `).join('')}
@@ -147,19 +148,22 @@ export function initMobileNav() {
         flex-shrink:0;
       ">
         <!-- Mode toggle -->
-        <div id="drawer-mode-toggle" role="button" tabindex="0"
+        <div id="drawer-mode-toggle"
+          role="button" tabindex="0"
           aria-label="Toggle Lite/Pro mode"
           style="
             display:flex;align-items:center;justify-content:space-between;
             padding:10px 12px;border-radius:10px;
             background:rgba(255,255,255,0.05);
             cursor:pointer;margin-bottom:8px;
-            min-height:44px;touch-action:manipulation;
+            min-height:44px;
             -webkit-tap-highlight-color:transparent;
+            touch-action:manipulation;
           ">
-          <span style="font-size:0.875rem;font-weight:500;color:rgba(255,255,255,0.6)">
-            Lite Mode
-          </span>
+          <span style="
+            font-size:0.875rem;font-weight:500;
+            color:rgba(255,255,255,0.6);
+          ">Lite Mode</span>
           <div id="drawer-mode-pill" style="
             width:40px;height:22px;border-radius:999px;
             background:rgba(255,255,255,0.15);
@@ -180,10 +184,13 @@ export function initMobileNav() {
           style="
             display:flex;align-items:center;gap:8px;
             padding:10px 12px;border-radius:10px;
-            color:rgba(255,255,255,0.4);font-size:0.875rem;font-weight:500;
-            cursor:pointer;border:none;background:none;width:100%;
-            transition:all 0.15s;min-height:44px;
-            touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+            color:rgba(255,255,255,0.4);
+            font-size:0.875rem;font-weight:500;
+            cursor:pointer;border:none;background:none;
+            width:100%;min-height:44px;
+            transition:all 0.15s;
+            -webkit-tap-highlight-color:transparent;
+            touch-action:manipulation;
           ">
           ${renderIcon('logout', 16, 'currentColor')}
           Sign out
@@ -192,46 +199,55 @@ export function initMobileNav() {
     </div>
   `
 
+  // Append everything to body
   document.body.appendChild(drawer)
   document.body.appendChild(nav)
   document.body.appendChild(fab)
 
-  // ── Visibility ─────────────────────────────────────────────
-  function isHiddenRoute() {
-    return HIDDEN_ROUTES.has(window.location.pathname)
-  }
-
+  // ── Visibility control ───────────────────────────────────
+  // This is the ONLY function that shows/hides the nav
   function updateVisibility() {
-    const hidden = isHiddenRoute()
+    const path   = window.location.pathname
+    const hidden = HIDDEN_ROUTES.has(path)
     const mobile = window.innerWidth <= 768
+    const show   = !hidden && mobile
 
-    const show = !hidden && mobile
     nav.style.display = show ? 'block' : 'none'
     fab.style.display = show ? 'flex'  : 'none'
 
-    if (!show && drawerOpen) closeDrawer()
+    // Also close drawer if we're on a hidden route
+    if (hidden && drawerOpen) closeDrawer()
   }
 
-  // ── Render bottom nav ──────────────────────────────────────
+  // ── Render bottom nav items ──────────────────────────────
   function renderNav() {
     const path = window.location.pathname
     nav.innerHTML = `
       <div class="mobile-nav-glass">
         ${MOBILE_ITEMS.map(item => `
-          <div class="mobile-nav-item ${path === item.path ? 'active' : ''}"
-               data-path="${item.path}"
-               role="button"
-               tabindex="0"
-               aria-label="${item.label}"
-               aria-current="${path === item.path ? 'page' : 'false'}">
+          <div
+            class="mobile-nav-item ${path === item.path ? 'active' : ''}"
+            data-path="${item.path}"
+            role="button"
+            tabindex="0"
+            aria-label="${item.label}"
+            aria-current="${path === item.path ? 'page' : 'false'}"
+          >
             <div class="m-icon">${Icons[item.icon]?.(22) || ''}</div>
             <span class="m-label">${item.label}</span>
           </div>
         `).join('')}
-        <!-- Menu button — inside nav bar -->
-        <div class="mobile-nav-item" id="nav-menu-btn"
-             role="button" tabindex="0" aria-label="Open menu"
-             aria-expanded="false" aria-haspopup="true">
+
+        <!-- Hamburger menu button -->
+        <div
+          class="mobile-nav-item"
+          id="nav-menu-btn"
+          role="button"
+          tabindex="0"
+          aria-label="Open menu"
+          aria-expanded="false"
+          aria-haspopup="true"
+        >
           <div class="m-icon">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
@@ -245,17 +261,16 @@ export function initMobileNav() {
       </div>
     `
 
-    // Nav item clicks
+    // Nav item tap handlers
     nav.querySelectorAll('.mobile-nav-item[data-path]').forEach(el => {
       el.addEventListener('click', () => {
         navigate(el.dataset.path)
-        // Update active states immediately for responsiveness
         nav.querySelectorAll('.mobile-nav-item[data-path]').forEach(i => {
-          i.classList.toggle('active', i.dataset.path === el.dataset.path)
-          i.setAttribute('aria-current', i.dataset.path === el.dataset.path ? 'page' : 'false')
+          const active = i.dataset.path === el.dataset.path
+          i.classList.toggle('active', active)
+          i.setAttribute('aria-current', active ? 'page' : 'false')
         })
       })
-      // Keyboard support
       el.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
@@ -264,12 +279,13 @@ export function initMobileNav() {
       })
     })
 
+    // Hamburger tap
     nav.querySelector('#nav-menu-btn')?.addEventListener('click', () => {
       drawerOpen ? closeDrawer() : openDrawer()
     })
   }
 
-  // ── Drawer ─────────────────────────────────────────────────
+  // ── Drawer open / close ──────────────────────────────────
   let drawerOpen = false
 
   function openDrawer() {
@@ -279,7 +295,7 @@ export function initMobileNav() {
     drawer.querySelector('#drawer-panel').style.transform     = 'translateX(0)'
     nav.querySelector('#nav-menu-btn')?.setAttribute('aria-expanded', 'true')
 
-    // Update active items
+    // Highlight current route
     const path = window.location.pathname
     drawer.querySelectorAll('.drawer-nav-item').forEach(el => {
       const active = el.dataset.path === path
@@ -287,10 +303,8 @@ export function initMobileNav() {
       el.style.color      = active ? 'var(--teal-500,#14B8A6)' : 'rgba(255,255,255,0.58)'
     })
 
-    // Mode toggle state
     updateModeToggle()
     updateDrawerStoreSwitcher()
-
     if (navigator.vibrate) navigator.vibrate(8)
   }
 
@@ -318,12 +332,16 @@ export function initMobileNav() {
     el.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center">
         <select aria-label="Select store" style="
-          flex:1;background:rgba(255,255,255,0.08);
+          flex:1;
+          background:rgba(255,255,255,0.08);
           border:1px solid rgba(255,255,255,0.12);
-          border-radius:10px;padding:10px 12px;
-          color:rgba(255,255,255,0.8);font-size:0.875rem;
-          outline:none;cursor:pointer;min-height:44px;
-          -webkit-appearance:none;appearance:none;
+          border-radius:10px;
+          padding:10px 12px;
+          color:rgba(255,255,255,0.8);
+          font-size:0.875rem;
+          outline:none;cursor:pointer;
+          min-height:44px;
+          -webkit-appearance:none;
         " id="drawer-store-select">
           ${stores.map(s => `
             <option value="${s.id}"
@@ -338,19 +356,20 @@ export function initMobileNav() {
             Joint View
           </option>
         </select>
-        <button id="drawer-add-store" aria-label="Add store" style="
+
+        <button id="drawer-add-store" aria-label="Add new store" style="
           width:44px;height:44px;flex-shrink:0;
           border-radius:10px;
           background:rgba(255,255,255,0.08);
           border:1px solid rgba(255,255,255,0.12);
           display:flex;align-items:center;justify-content:center;
           color:rgba(255,255,255,0.6);cursor:pointer;
-          transition:all 0.15s;touch-action:manipulation;
+          -webkit-tap-highlight-color:transparent;
         ">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
+            <line x1="5"  y1="12" x2="19" y2="12"/>
           </svg>
         </button>
       </div>
@@ -383,7 +402,7 @@ export function initMobileNav() {
     })
   }
 
-  // ── Drawer events ──────────────────────────────────────────
+  // ── Drawer events ────────────────────────────────────────
   drawer.querySelector('#drawer-backdrop').addEventListener('click', closeDrawer)
   drawer.querySelector('#drawer-close').addEventListener('click', closeDrawer)
 
@@ -393,7 +412,10 @@ export function initMobileNav() {
       closeDrawer()
     })
     el.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() }
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        el.click()
+      }
     })
     el.addEventListener('mouseenter', () => {
       if (el.dataset.path !== window.location.pathname) {
@@ -422,7 +444,7 @@ export function initMobileNav() {
     await supabase.auth.signOut()
   })
 
-  // ── FAB Camera ────────────────────────────────────────────
+  // ── FAB camera ───────────────────────────────────────────
   fab.addEventListener('click', () => {
     if (navigator.vibrate) navigator.vibrate(10)
 
@@ -443,17 +465,17 @@ export function initMobileNav() {
           sessionStorage.setItem('pending_scan_name', file.name)
           sessionStorage.setItem('pending_scan_type', file.type)
           sessionStorage.setItem('pending_scan_data', ev.target.result)
-        } catch(_) {}
+        } catch (_) {}
         navigate('/ocr')
       }
       reader.readAsDataURL(file)
     })
 
-    // Must be synchronous click on iOS
     input.click()
   })
 
-  // ── Route listener ────────────────────────────────────────
+  // ── Route & resize listeners ─────────────────────────────
+  // Called on every navigation — this is what keeps nav hidden on auth
   window.addEventListener('popstate', () => {
     updateVisibility()
     renderNav()
@@ -462,26 +484,30 @@ export function initMobileNav() {
 
   window.addEventListener('resize', updateVisibility)
 
-  // Apply saved mode
+  // ── Apply saved mode ─────────────────────────────────────
   if (localStorage.getItem('storeos-mode') === 'lite') {
     document.body.classList.add('lite-mode')
   }
 
-  // ── Init ──────────────────────────────────────────────────
+  // ── Init — render then check visibility ──────────────────
   renderNav()
+  // Run AFTER renderNav so DOM exists
   updateVisibility()
 
   return { renderNav, updateVisibility }
 }
 
+// ── Consume pending scan from FAB ────────────────────────────
 export function consumePendingScan() {
   const data = sessionStorage.getItem('pending_scan_data')
   const name = sessionStorage.getItem('pending_scan_name')
   const type = sessionStorage.getItem('pending_scan_type')
   if (!data) return null
+
   sessionStorage.removeItem('pending_scan_data')
   sessionStorage.removeItem('pending_scan_name')
   sessionStorage.removeItem('pending_scan_type')
+
   const arr   = data.split(',')
   const bstr  = atob(arr[1])
   const u8arr = new Uint8Array(bstr.length)
