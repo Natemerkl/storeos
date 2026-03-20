@@ -8,18 +8,20 @@ export async function savePattern(key, data) {
   const { currentStore } = appStore.getState()
   if (!currentStore?.id) return
 
-  // Merge with existing
   const existing = await getPattern(key)
   const merged   = deepMerge(existing || {}, data)
+  CACHE[key]     = merged
 
-  CACHE[key] = merged
+  const { error } = await supabase
+    .from('user_patterns')
+    .upsert({
+      store_id:     currentStore.id,
+      pattern_key:  key,
+      pattern_data: merged,
+      updated_at:   new Date().toISOString(),
+    }, { onConflict: 'store_id,pattern_key' })
 
-  await supabase.from('user_patterns').upsert({
-    store_id:     currentStore.id,
-    pattern_key:  key,
-    pattern_data: merged,
-    updated_at:   new Date().toISOString(),
-  }, { onConflict: 'store_id,pattern_key' })
+  if (error) console.warn('Pattern save failed:', error.message)
 }
 
 // ── Get a pattern ─────────────────────────────────────────────
@@ -29,18 +31,18 @@ export async function getPattern(key) {
   const { currentStore } = appStore.getState()
   if (!currentStore?.id) return null
 
-  const { data } = await supabase
+  // Use maybeSingle() instead of single() — returns null instead of error when no rows
+  const { data, error } = await supabase
     .from('user_patterns')
     .select('pattern_data')
     .eq('store_id', currentStore.id)
     .eq('pattern_key', key)
-    .single()
+    .maybeSingle()
 
-  if (data?.pattern_data) {
-    CACHE[key] = data.pattern_data
-    return data.pattern_data
-  }
-  return null
+  if (error || !data) return null
+
+  CACHE[key] = data.pattern_data
+  return data.pattern_data
 }
 
 // ── Learn from a completed OCR session ───────────────────────
