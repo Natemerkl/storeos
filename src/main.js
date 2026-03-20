@@ -1,3 +1,29 @@
+// Global error handler — catches silent white pages
+window.addEventListener('error', (e) => {
+  console.error('Global error:', e.message)
+  // If app container is empty, something went wrong — reload once
+  setTimeout(() => {
+    const app = document.getElementById('app')
+    if (app && app.children.length === 0) {
+      const reloaded = sessionStorage.getItem('error-reload')
+      if (!reloaded) {
+        sessionStorage.setItem('error-reload', '1')
+        window.location.reload()
+      }
+    }
+  }, 2000)
+})
+
+window.addEventListener('unhandledrejection', (e) => {
+  // Ignore supabase lock errors — they self-recover
+  if (e.reason?.message?.includes('Lock broken') ||
+      e.reason?.message?.includes('lock')) {
+    e.preventDefault()
+    return
+  }
+  console.error('Unhandled rejection:', e.reason)
+})
+
 import './styles/main.css'
 import { initRouter, navigate } from './router.js'
 import { supabase } from './supabase.js'
@@ -124,16 +150,33 @@ async function init() {
     document.body.classList.add('lite-mode')
   }
 
-  const { data: { session } } = await supabase.auth.getSession()
+  // Wait for auth to stabilize — fixes lock race condition
+  await new Promise(r => setTimeout(r, 100))
 
-  if (session) {
-    appStore.getState().setUser(session.user)
-    await loadUserData(session.user)
-  } else {
+  let session = null
+  try {
+    const { data } = await supabase.auth.getSession()
+    session = data?.session
+  } catch(e) {
+    // Lock error — retry once
+    await new Promise(r => setTimeout(r, 500))
+    try {
+      const { data } = await supabase.auth.getSession()
+      session = data?.session
+    } catch(e2) {
+      console.warn('Auth session error:', e2.message)
+    }
+  }
+
+  if (!session) {
     buildFullScreen()
     initRouter()
     navigate('/auth')
+    return
   }
+
+  appStore.getState().setUser(session.user)
+  await loadUserData(session.user)
 }
 
 // Auth state listener
