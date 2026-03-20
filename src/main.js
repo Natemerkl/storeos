@@ -94,6 +94,12 @@ async function loadUserData(user) {
   appStore.getState().setStores(stores)
   appStore.getState().setCurrentStore(stores[0])
   buildLayout()
+
+  // Replace /auth in history so back button doesn't go back to auth
+  if (window.location.pathname === '/auth') {
+    window.history.replaceState({}, '', '/dashboard')
+  }
+
   initRouter()
 }
 
