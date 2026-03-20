@@ -105,22 +105,25 @@ async function init() {
 
   const { data: { session } } = await supabase.auth.getSession()
 
-  if (!session) {
+  if (session) {
+    appStore.getState().setUser(session.user)
+    await loadUserData(session.user)
+  } else {
     buildFullScreen()
     initRouter()
     navigate('/auth')
-    return
   }
-
-  appStore.getState().setUser(session.user)
-  await loadUserData(session.user)
 }
 
 // Auth state listener
 supabase.auth.onAuthStateChange(async (event, session) => {
   if (event === 'SIGNED_IN' && session) {
-    appStore.getState().setUser(session.user)
-    await loadUserData(session.user)
+    // Only load if user wasn't already set to avoid double-loading
+    const currentUser = appStore.getState().user
+    if (!currentUser || currentUser.id !== session.user.id) {
+      appStore.getState().setUser(session.user)
+      await loadUserData(session.user)
+    }
   }
   if (event === 'SIGNED_OUT') {
     appStore.getState().setUser(null)
