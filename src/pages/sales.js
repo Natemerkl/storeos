@@ -7,73 +7,55 @@ import { openReceiptModal } from '../components/receipt-modal.js'
 import { audit } from '../utils/audit.js'
 import { getInventory, invalidateAfterSale } from '../utils/db.js'
 
-// ── View mode: 'grid' or 'list' ──────────────────────────────
-let viewMode   = localStorage.getItem('pos-view') || 'grid'
-let cart       = []   // [{ item, qty, price, note }]
-let allItems   = []
+let viewMode    = localStorage.getItem('pos-view') || 'grid'
+let cart        = []
+let allItems    = []
 let searchQuery = ''
-let customers  = []
-let accounts   = []
+let customers   = []
+let accounts    = []
 
 export async function render(container) {
   const { currentStore, accountingView, stores } = appStore.getState()
   const storeIds = accountingView === 'joint' ? stores.map(s => s.id) : [currentStore?.id]
 
-  // Load data
   const [items, { data: custs }, { data: accs }] = await Promise.all([
     getInventory(),
     supabase.from('customers').select('id, name, phone').in('store_id', storeIds).order('name'),
     supabase.from('cash_accounts').select('id, name, account_type').in('store_id', storeIds),
   ])
 
-  allItems  = items   || []
-  customers = custs   || []
-  accounts  = accs    || []
+  allItems  = items  || []
+  customers = custs  || []
+  accounts  = accs   || []
 
   container.innerHTML = `
     <div class="pos-layout">
-
       <!-- LEFT: Product browser -->
       <div class="pos-left">
-
-        <!-- Header -->
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;gap:0.75rem">
           <div class="page-title">Point of Sale</div>
-          <div style="display:flex;gap:0.5rem;align-items:center">
-            <!-- View toggle -->
-            <div class="view-toggle">
-              <button class="view-btn ${viewMode==='grid'?'active':''}" data-view="grid" title="Grid view">
-                ${renderIcon('dashboard', 15)}
-              </button>
-              <button class="view-btn ${viewMode==='list'?'active':''}" data-view="list" title="List view">
-                ${renderIcon('reports', 15)}
-              </button>
-            </div>
+          <div class="view-toggle">
+            <button class="view-btn ${viewMode==='grid'?'active':''}" data-view="grid" title="Grid view">
+              ${renderIcon('dashboard', 15)}
+            </button>
+            <button class="view-btn ${viewMode==='list'?'active':''}" data-view="list" title="List view">
+              ${renderIcon('reports', 15)}
+            </button>
           </div>
         </div>
 
-        <!-- Search -->
         <div class="pos-search-wrap">
           <div class="pos-search-inner">
             ${renderIcon('search', 16, 'var(--muted)')}
-            <input
-              class="pos-search-input"
-              id="pos-search"
-              type="text"
-              placeholder="Search products..."
-              autocomplete="off"
-              value="${searchQuery}"
-            >
-            <button class="pos-search-clear" id="pos-search-clear" style="${searchQuery ? '' : 'display:none'}">
+            <input class="pos-search-input" id="pos-search" type="text"
+              placeholder="Search products..." autocomplete="off" value="${searchQuery}">
+            <button class="pos-search-clear" id="pos-search-clear" style="${searchQuery?'':'display:none'}">
               ${renderIcon('close', 13)}
             </button>
           </div>
         </div>
 
-        <!-- Category filters -->
         <div id="pos-categories" class="pos-categories"></div>
-
-        <!-- Product grid/list -->
         <div id="pos-products" class="pos-products ${viewMode}"></div>
       </div>
 
@@ -98,10 +80,7 @@ export async function render(container) {
           </div>
         </div>
 
-        <!-- Totals -->
         <div class="pos-totals" id="pos-totals" style="display:none">
-
-          <!-- Discount row -->
           <div class="total-row">
             <span class="total-label">Subtotal</span>
             <span class="total-val" id="tot-subtotal">0.00 ETB</span>
@@ -109,27 +88,19 @@ export async function render(container) {
           <div class="total-row">
             <span class="total-label">
               Discount
-              <input type="number" id="discount-input" class="inline-input" min="0" max="100" value="0" placeholder="0"> %
+              <input type="number" id="discount-input" class="inline-input" min="0" max="100" value="0"> %
             </span>
             <span class="total-val" id="tot-discount" style="color:var(--danger)">-0.00 ETB</span>
           </div>
-
           <div class="total-divider"></div>
-
           <div class="total-row total-final">
             <span>Total</span>
             <span id="tot-final">0.00 ETB</span>
           </div>
-
-          <!-- Profit indicator -->
           <div id="profit-bar" class="profit-bar"></div>
-
         </div>
 
-        <!-- Checkout form -->
         <div class="pos-checkout" id="pos-checkout" style="display:none">
-
-          <!-- Payment method -->
           <div style="margin-bottom:0.75rem">
             <div class="form-label" style="margin-bottom:0.4rem">Payment</div>
             <div class="pay-methods" id="pay-methods">
@@ -141,11 +112,9 @@ export async function render(container) {
             </div>
           </div>
 
-          <!-- Credit customer fields -->
           <div id="credit-fields" style="display:none;margin-bottom:0.75rem">
             <div class="credit-banner">
-              ${renderIcon('user', 14)}
-              Customer required for credit sale
+              ${renderIcon('user', 14)} Customer required for credit sale
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
               <div>
@@ -162,7 +131,6 @@ export async function render(container) {
             </div>
           </div>
 
-          <!-- Optional customer (non-credit) -->
           <div id="optional-customer" style="margin-bottom:0.75rem">
             <details>
               <summary class="optional-summary">+ Customer info (optional)</summary>
@@ -182,7 +150,6 @@ export async function render(container) {
             </details>
           </div>
 
-          <!-- Cash account -->
           <div style="margin-bottom:0.75rem">
             <label class="form-label">Cash Account</label>
             <select class="form-input" id="sale-account">
@@ -190,13 +157,11 @@ export async function render(container) {
             </select>
           </div>
 
-          <!-- Description -->
           <div style="margin-bottom:0.875rem">
             <label class="form-label">Note (optional)</label>
             <input class="form-input" id="sale-note" placeholder="e.g. delivery, invoice ref...">
           </div>
 
-          <!-- Bulk sale toggle -->
           <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.875rem">
             <input type="checkbox" id="bulk-toggle" style="width:16px;height:16px;accent-color:var(--accent)">
             <label for="bulk-toggle" style="font-size:0.875rem;font-weight:500;cursor:pointer">
@@ -204,40 +169,25 @@ export async function render(container) {
             </label>
           </div>
 
-          <!-- SELL button -->
           <button class="btn btn-primary btn-sell" id="btn-sell">
-            ${renderIcon('check', 18)}
-            Complete Sale
+            ${renderIcon('check', 18)} Complete Sale
           </button>
-
         </div>
       </div>
     </div>
   `
 
-  // ── Inject POS styles ────────────────────────────────────
   injectPOSStyles()
 
   // ── Mobile cart FAB ───────────────────────────────────────
   const cartFab = document.createElement('button')
   cartFab.id = 'cart-fab'
   cartFab.style.cssText = `
-    display:none;
-    position:fixed;
-    bottom:90px;
-    right:1rem;
-    z-index:200;
-    width:54px;
-    height:54px;
-    border-radius:50%;
-    background:var(--accent);
-    color:#fff;
-    border:none;
-    cursor:pointer;
-    align-items:center;
-    justify-content:center;
+    display:none;position:fixed;bottom:90px;right:1rem;z-index:200;
+    width:54px;height:54px;border-radius:50%;background:var(--accent);
+    color:#fff;border:none;cursor:pointer;
+    align-items:center;justify-content:center;
     box-shadow:0 4px 16px rgba(13,148,136,0.35);
-    font-size:1.1rem;
     transition:transform 0.2s cubic-bezier(0.34,1.56,0.64,1);
   `
   cartFab.innerHTML = `
@@ -252,14 +202,9 @@ export async function render(container) {
       ">0</span>
     </div>
   `
-
   document.body.appendChild(cartFab)
 
-  // Show on mobile only
-  if (window.innerWidth <= 768) {
-    cartFab.style.display = 'flex'
-  }
-
+  if (window.innerWidth <= 768) cartFab.style.display = 'flex'
   window.addEventListener('resize', () => {
     cartFab.style.display = window.innerWidth <= 768 ? 'flex' : 'none'
   })
@@ -271,41 +216,34 @@ export async function render(container) {
     cartOpen = open
     cartPanel.classList.toggle('open', open)
     cartFab.style.transform = open ? 'scale(0.9)' : 'scale(1)'
-    // Prevent body scroll when cart open
     document.body.style.overflow = open ? 'hidden' : ''
   }
 
   cartFab.addEventListener('click', () => toggleCart(!cartOpen))
-
-  // Tap header to close on mobile
   container.querySelector('.pos-cart-header').addEventListener('click', () => {
     if (window.innerWidth <= 768 && cartOpen) toggleCart(false)
   })
-
-  // Close on backdrop tap
   cartPanel.addEventListener('click', e => {
     if (e.target === cartPanel && window.innerWidth <= 768) toggleCart(false)
   })
 
-  // Cleanup fab on page leave
   container._cleanup = () => {
     cartFab.remove()
     document.body.style.overflow = ''
   }
 
-  // ── State ────────────────────────────────────────────────
   let activeCategory = ''
   let paymentMethod  = 'cash'
   let discount       = 0
 
-  // ── Render categories ────────────────────────────────────
+  // ── Categories ────────────────────────────────────────────
   function renderCategories() {
     const cats = [...new Set(allItems.map(i => i.category).filter(Boolean))].sort()
     const el   = container.querySelector('#pos-categories')
     el.innerHTML = `
-      <button class="cat-chip ${!activeCategory ? 'active' : ''}" data-cat="">All</button>
+      <button class="cat-chip ${!activeCategory?'active':''}" data-cat="">All</button>
       ${cats.map(c => `
-        <button class="cat-chip ${activeCategory === c ? 'active' : ''}" data-cat="${c}">${c}</button>
+        <button class="cat-chip ${activeCategory===c?'active':''}" data-cat="${c}">${c}</button>
       `).join('')}
     `
     el.querySelectorAll('.cat-chip').forEach(btn => {
@@ -317,28 +255,30 @@ export async function render(container) {
     })
   }
 
-  // ── Render products ──────────────────────────────────────
+  // ── Products ──────────────────────────────────────────────
+  function getItemPrice(item) {
+    // Priority: selling_price → unit_cost → 0
+    return Number(item.selling_price) > 0
+      ? Number(item.selling_price)
+      : Number(item.unit_cost) > 0
+        ? Number(item.unit_cost)
+        : 0
+  }
+
   function renderProducts() {
     const el = container.querySelector('#pos-products')
     el.className = `pos-products ${viewMode}`
 
     let filtered = allItems
+    if (activeCategory) filtered = filtered.filter(i => i.category === activeCategory)
 
-    // Category filter
-    if (activeCategory) {
-      filtered = filtered.filter(i => i.category === activeCategory)
-    }
-
-    // Search with fuzzy ranking
     if (searchQuery) {
-      const matched = fuzzyMatch(searchQuery, filtered, { key:'item_name', threshold:0.1, limit:50 })
-      // Put matched items first, then rest
+      const matched    = fuzzyMatch(searchQuery, filtered, { key:'item_name', threshold:0.1, limit:50 })
       const matchedIds = new Set(matched.map(m => m.id))
-      const unmatched  = filtered.filter(i => !matchedIds.has(i.id))
-      filtered = [...matched, ...unmatched]
+      filtered = [...matched, ...filtered.filter(i => !matchedIds.has(i.id))]
     }
 
-    if (filtered.length === 0) {
+    if (!filtered.length) {
       el.innerHTML = `
         <div class="products-empty">
           ${renderIcon('inventory', 32, 'var(--gray-300)')}
@@ -352,11 +292,11 @@ export async function render(container) {
 
     if (viewMode === 'grid') {
       el.innerHTML = filtered.map(item => {
-        const inCart    = cart.find(c => c.item.id === item.id)
+        const inCart     = cart.find(c => c.item.id === item.id)
         const outOfStock = Number(item.quantity) <= 0
+        const price      = getItemPrice(item)
         return `
-          <div class="product-card ${inCart ? 'in-cart' : ''} ${outOfStock ? 'out-of-stock' : ''}"
-               data-id="${item.id}">
+          <div class="product-card ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}" data-id="${item.id}">
             <div class="product-card-inner">
               <div class="product-icon-wrap">
                 ${renderIcon('inventory', 20, inCart ? 'var(--accent)' : 'var(--gray-400)')}
@@ -364,55 +304,44 @@ export async function render(container) {
               <div class="product-name">${highlight(item.item_name, searchQuery)}</div>
               <div class="product-cat">${item.category || ''}</div>
               <div class="product-price">
-  ${Number(item.selling_price || item.unit_cost || 0) > 0
-    ? fmt(item.selling_price || item.unit_cost) + ' ETB'
-    : 'No price set'
-  }
-</div>
-              ${outOfStock
-                ? `<div class="product-stock out">Out of stock</div>`
-                : `<div class="product-stock ok">${item.quantity} in stock</div>`
-              }
+                ${price > 0 ? fmt(price) + ' ETB' : 'No price set'}
+              </div>
+              <div class="product-stock ${outOfStock?'out':'ok'}">
+                ${outOfStock ? 'Out of stock' : item.quantity + ' in stock'}
+              </div>
             </div>
-            <button class="product-add-btn ${inCart ? 'added' : ''}" data-id="${item.id}">
-              ${inCart
-                ? renderIcon('check', 14, 'var(--accent)')
-                : renderIcon('plus', 14, '#fff')
-              }
+            <button class="product-add-btn ${inCart?'added':''}" data-id="${item.id}">
+              ${inCart ? renderIcon('check', 14, 'var(--accent)') : renderIcon('plus', 14, '#fff')}
             </button>
           </div>
         `
       }).join('')
     } else {
-      // List / markdown view
       el.innerHTML = `
         <div class="product-list">
           ${filtered.map(item => {
             const inCart     = cart.find(c => c.item.id === item.id)
             const outOfStock = Number(item.quantity) <= 0
+            const price      = getItemPrice(item)
             return `
-              <div class="product-row ${inCart ? 'in-cart' : ''} ${outOfStock ? 'out-of-stock' : ''}"
-                   data-id="${item.id}">
+              <div class="product-row ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}" data-id="${item.id}">
                 <div class="product-row-check">
-                  <div class="product-row-dot ${inCart ? 'active' : ''}"></div>
+                  <div class="product-row-dot ${inCart?'active':''}"></div>
                 </div>
                 <div class="product-row-info">
                   <div class="product-row-name">${highlight(item.item_name, searchQuery)}</div>
                   <div class="product-row-meta">
                     ${item.category ? `<span>${item.category}</span>` : ''}
                     ${item.sku      ? `<span>SKU: ${item.sku}</span>` : ''}
-                    <span class="${outOfStock ? 'out-of-stock-text' : 'in-stock-text'}">
-                      ${outOfStock ? 'Out of stock' : `${item.quantity} in stock`}
+                    <span class="${outOfStock?'out-of-stock-text':'in-stock-text'}">
+                      ${outOfStock ? 'Out of stock' : item.quantity + ' in stock'}
                     </span>
                   </div>
                 </div>
                 <div class="product-row-price">
-  ${Number(item.selling_price || item.unit_cost || 0) > 0
-    ? fmt(item.selling_price || item.unit_cost) + ' ETB'
-    : '—'
-  }
-</div>
-                <button class="product-row-add ${inCart ? 'added' : ''}" data-id="${item.id}">
+                  ${price > 0 ? fmt(price) + ' ETB' : '—'}
+                </div>
+                <button class="product-row-add ${inCart?'added':''}" data-id="${item.id}">
                   ${inCart ? renderIcon('check', 14, 'var(--accent)') : renderIcon('plus', 14, '#fff')}
                 </button>
               </div>
@@ -422,12 +351,10 @@ export async function render(container) {
       `
     }
 
-    // Add to cart listeners
     container.querySelectorAll('[data-id].product-card, [data-id].product-row').forEach(el => {
       el.addEventListener('click', e => {
         if (e.target.closest('button')) return
-        const id = el.dataset.id
-        const item = allItems.find(i => i.id === id)
+        const item = allItems.find(i => i.id === el.dataset.id)
         if (item) addToCart(item)
       })
     })
@@ -435,38 +362,25 @@ export async function render(container) {
     container.querySelectorAll('.product-add-btn, .product-row-add').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation()
-        const id   = btn.dataset.id
-        const item = allItems.find(i => i.id === id)
+        const item = allItems.find(i => i.id === btn.dataset.id)
         if (item) addToCart(item)
       })
     })
   }
 
-  // ── Cart operations ──────────────────────────────────────
- function addToCart(item) {
-  const existing = cart.find(c => c.item.id === item.id)
+  // ── Cart operations ───────────────────────────────────────
+  function addToCart(item) {
+    const existing  = cart.find(c => c.item.id === item.id)
+    const unitPrice = getItemPrice(item)
 
-  // Price priority: selling_price → unit_cost → 0
-  const unitPrice = Number(item.selling_price) > 0
-    ? Number(item.selling_price)
-    : Number(item.unit_cost) > 0
-      ? Number(item.unit_cost)
-      : 0
-
-  if (existing) {
-    existing.qty++
-    existing.confirmedTotal = existing.qty * existing.price
-  } else {
-    cart.push({
-      item,
-      qty:   1,
-      price: unitPrice,
-      note:  '',
-    })
+    if (existing) {
+      existing.qty++
+    } else {
+      cart.push({ item, qty: 1, price: unitPrice })
+    }
+    renderCart()
+    renderProducts()
   }
-  renderCart()
-  renderProducts()
-}
 
   function removeFromCart(itemId) {
     cart = cart.filter(c => c.item.id !== itemId)
@@ -474,18 +388,15 @@ export async function render(container) {
     renderProducts()
   }
 
-  function updateCartItem(itemId, field, value) {
-    const entry = cart.find(c => c.item.id === itemId)
-    if (!entry) return
-    entry[field] = value
-    updateTotals()
-  }
-
+  // ── Render cart — NO re-render on input change ────────────
+  // KEY FIX: inputs use event delegation, not re-render on every keystroke
   function renderCart() {
-    const itemsEl   = container.querySelector('#cart-items')
-    const totalsEl  = container.querySelector('#pos-totals')
-    const checkoutEl= container.querySelector('#pos-checkout')
-    const badge     = container.querySelector('#cart-badge')
+    const itemsEl    = container.querySelector('#cart-items')
+    const totalsEl   = container.querySelector('#pos-totals')
+    const checkoutEl = container.querySelector('#pos-checkout')
+    const badge      = container.querySelector('#cart-badge')
+    const fabBadge   = document.getElementById('fab-badge')
+    const fab        = document.getElementById('cart-fab')
 
     if (cart.length === 0) {
       itemsEl.innerHTML = `
@@ -498,39 +409,29 @@ export async function render(container) {
       totalsEl.style.display   = 'none'
       checkoutEl.style.display = 'none'
       badge.style.display      = 'none'
+      if (fabBadge) fabBadge.style.display = 'none'
       return
     }
 
-    badge.style.display  = 'inline-flex'
-    badge.textContent    = cart.length
-
-    // Sync FAB badge
-    const fabBadge = document.getElementById('fab-badge')
-    if (fabBadge) {
-      fabBadge.style.display = cart.length > 0 ? 'inline-block' : 'none'
-      fabBadge.textContent   = cart.length
-    }
-
-    // Pulse FAB when item added
-    const fab = document.getElementById('cart-fab')
+    badge.style.display = 'inline-flex'
+    badge.textContent   = cart.length
+    if (fabBadge) { fabBadge.style.display = 'inline-block'; fabBadge.textContent = cart.length }
     if (fab && cart.length > 0) {
       fab.style.transform = 'scale(1.2)'
       setTimeout(() => { fab.style.transform = 'scale(1)' }, 200)
     }
-
-    // Auto-open cart on mobile when first item added
     if (cart.length === 1 && window.innerWidth <= 768 && !cartOpen) {
       setTimeout(() => toggleCart(true), 300)
     }
 
+    // Build cart HTML — inputs keep their values, NO re-render triggers
     itemsEl.innerHTML = cart.map(entry => {
-      const subtotal = entry.qty * entry.price
-      const cost     = Number(entry.item.unit_cost) || 0
-      const profit   = entry.price - cost
-      const isLoss   = profit < 0
+      const cost   = Number(entry.item.unit_cost) || 0
+      const isLoss = entry.price > 0 && cost > 0 && entry.price < cost
+      const lineTotal = entry.qty * entry.price
 
       return `
-        <div class="cart-item" data-id="${entry.item.id}">
+        <div class="cart-item" data-cart-id="${entry.item.id}">
           <div class="cart-item-top">
             <div class="cart-item-name">${entry.item.item_name}</div>
             <button class="cart-remove" data-remove="${entry.item.id}">
@@ -539,9 +440,8 @@ export async function render(container) {
           </div>
 
           <div class="cart-item-controls">
-            <!-- Qty -->
             <div class="qty-control">
-              <button class="qty-btn" data-qty-change="${entry.item.id}" data-delta="-1">−</button>
+              <button class="qty-btn" data-qty-dec="${entry.item.id}">−</button>
               <input
                 type="number"
                 class="qty-input"
@@ -549,31 +449,32 @@ export async function render(container) {
                 min="0.01"
                 step="0.01"
                 data-qty-input="${entry.item.id}"
+                inputmode="decimal"
               >
-              <button class="qty-btn" data-qty-change="${entry.item.id}" data-delta="1">+</button>
+              <button class="qty-btn" data-qty-inc="${entry.item.id}">+</button>
             </div>
 
-            <!-- Price -->
             <div class="price-input-wrap">
               <span class="price-prefix">ETB</span>
               <input
                 type="number"
-                class="price-input ${isLoss ? 'price-loss' : ''}"
+                class="price-input ${isLoss?'price-loss':''}"
                 value="${entry.price}"
                 min="0"
                 step="0.01"
                 data-price-input="${entry.item.id}"
-                title="Unit selling price"
+                inputmode="decimal"
               >
             </div>
 
-            <!-- Line total -->
-            <div class="cart-line-total">
-  ${fmt(entry.qty * entry.price)} ETB
-</div>
+            <div class="cart-line-total" data-total-id="${entry.item.id}">
+              ${fmt(lineTotal)} ETB
+            </div>
+          </div>
+
           ${isLoss ? `
             <div class="loss-warning">
-              ${renderIcon('alert', 12)} Selling below cost (cost: ${fmt(cost)} ETB)
+              ${renderIcon('alert', 12)} Below cost (${fmt(cost)} ETB)
             </div>
           ` : ''}
         </div>
@@ -583,65 +484,115 @@ export async function render(container) {
     totalsEl.style.display   = 'block'
     checkoutEl.style.display = 'block'
 
-    // Cart item listeners
+    attachCartListeners()
+    updateTotals()
+  }
+
+  // ── Cart listeners — event delegation approach ────────────
+  // CRITICAL FIX: we use 'change' not 'input' for qty to avoid re-render
+  // For price we update in-place without re-rendering the whole cart
+  function attachCartListeners() {
+    // Remove button
     container.querySelectorAll('[data-remove]').forEach(btn => {
       btn.addEventListener('click', () => removeFromCart(btn.dataset.remove))
     })
 
-    container.querySelectorAll('[data-qty-change]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const entry = cart.find(c => c.item.id === btn.dataset.qtyChange)
-    if (!entry) return
-    const delta  = Number(btn.dataset.delta)
-    entry.qty    = Math.max(0.01, Math.round((entry.qty + delta) * 100) / 100)
-    renderCart()
-    renderProducts()
-  })
-})
+    // Qty decrement
+    container.querySelectorAll('[data-qty-dec]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id    = btn.dataset.qtyDec
+        const entry = cart.find(c => c.item.id === id)
+        if (!entry) return
+        entry.qty = Math.max(0.01, Math.round((entry.qty - 1) * 100) / 100)
+        // Update input value in-place
+        const input = container.querySelector(`[data-qty-input="${id}"]`)
+        if (input) input.value = entry.qty
+        updateLineTotal(id)
+        updateTotals()
+        // Only re-render if going below 1 to show warning or remove
+        if (entry.qty <= 0) removeFromCart(id)
+      })
+    })
 
-container.querySelectorAll('[data-qty-input]').forEach(input => {
-  input.addEventListener('change', () => {
-    const entry = cart.find(c => c.item.id === input.dataset.qtyInput)
-    if (!entry) return
-    entry.qty = Math.max(0.01, parseFloat(input.value) || 1)
-    renderCart()
-  })
-})
+    // Qty increment
+    container.querySelectorAll('[data-qty-inc]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id    = btn.dataset.qtyInc
+        const entry = cart.find(c => c.item.id === id)
+        if (!entry) return
+        entry.qty = Math.round((entry.qty + 1) * 100) / 100
+        const input = container.querySelector(`[data-qty-input="${id}"]`)
+        if (input) input.value = entry.qty
+        updateLineTotal(id)
+        updateTotals()
+      })
+    })
 
-container.querySelectorAll('[data-price-input]').forEach(input => {
-  input.addEventListener('input', () => {
-    const entry = cart.find(c => c.item.id === input.dataset.priceInput)
-    if (!entry) return
-    entry.price = parseFloat(input.value) || 0
-    // Update line total display immediately
-    const lineTotal = input.closest('.cart-item')?.querySelector('.cart-line-total')
-    if (lineTotal) lineTotal.textContent = fmt(entry.qty * entry.price) + ' ETB'
-    updateTotals()
-  })
-})
+    // Qty manual input — only update on blur/enter, NOT on every keystroke
+    container.querySelectorAll('[data-qty-input]').forEach(input => {
+      // Remove any existing listeners by cloning
+      const newInput = input.cloneNode(true)
+      input.parentNode.replaceChild(newInput, input)
 
-  function updateTotals() {
-  const subtotal  = cart.reduce((s, e) => s + (e.qty * e.price), 0)
-  const discAmt   = subtotal * (discount / 100)
-  const total     = subtotal - discAmt
-  const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost) || 0), 0)
-  const profit    = total - totalCost
-  const margin    = total > 0 ? (profit / total * 100) : 0
+      newInput.addEventListener('change', () => {
+        const id    = newInput.dataset.qtyInput
+        const entry = cart.find(c => c.item.id === id)
+        if (!entry) return
+        entry.qty = Math.max(0.01, parseFloat(newInput.value) || 1)
+        newInput.value = entry.qty
+        updateLineTotal(id)
+        updateTotals()
+      })
+    })
 
-  const set = (id, val) => {
-    const el = container.querySelector(id)
-    if (el) el.textContent = val
+    // Price input — update in-place WITHOUT re-rendering cart
+    // This is the keyboard disappear fix — we never re-render on price change
+    container.querySelectorAll('[data-price-input]').forEach(input => {
+      const newInput = input.cloneNode(true)
+      input.parentNode.replaceChild(newInput, input)
+
+      newInput.addEventListener('input', () => {
+        const id    = newInput.dataset.priceInput
+        const entry = cart.find(c => c.item.id === id)
+        if (!entry) return
+        entry.price = parseFloat(newInput.value) || 0
+        updateLineTotal(id)
+        updateTotals()
+        // Update loss warning class without re-rendering
+        const cost   = Number(entry.item.unit_cost) || 0
+        const isLoss = entry.price > 0 && cost > 0 && entry.price < cost
+        newInput.classList.toggle('price-loss', isLoss)
+      })
+    })
   }
 
-  set('#tot-subtotal', fmt(subtotal) + ' ETB')
-  set('#tot-discount', '-' + fmt(discAmt) + ' ETB')
-  set('#tot-final',    fmt(total) + ' ETB')
+  // Update a single line total in-place — no re-render
+  function updateLineTotal(itemId) {
+    const entry   = cart.find(c => c.item.id === itemId)
+    if (!entry) return
+    const total   = entry.qty * entry.price
+    const totalEl = container.querySelector(`[data-total-id="${itemId}"]`)
+    if (totalEl) totalEl.textContent = fmt(total) + ' ETB'
+  }
 
-  const profitBar = container.querySelector('#profit-bar')
-  if (profitBar) {
+  function updateTotals() {
+    const subtotal  = cart.reduce((s, e) => s + e.qty * e.price, 0)
+    const discAmt   = subtotal * (discount / 100)
+    const total     = subtotal - discAmt
+    const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost) || 0), 0)
+    const profit    = total - totalCost
+    const margin    = total > 0 ? (profit / total * 100) : 0
+
+    const set = (id, val) => { const el = container.querySelector(id); if (el) el.textContent = val }
+    set('#tot-subtotal', fmt(subtotal) + ' ETB')
+    set('#tot-discount', '-' + fmt(discAmt) + ' ETB')
+    set('#tot-final',    fmt(total) + ' ETB')
+
+    const profitBar = container.querySelector('#profit-bar')
+    if (!profitBar) return
     if (profit < 0) {
       profitBar.className = 'profit-bar loss'
-      profitBar.innerHTML = `${renderIcon('alert', 13)} Net loss of ${fmt(Math.abs(profit))} ETB on this sale`
+      profitBar.innerHTML = `${renderIcon('alert', 13)} Net loss of ${fmt(Math.abs(profit))} ETB`
     } else if (margin < 10) {
       profitBar.className = 'profit-bar low'
       profitBar.innerHTML = `${renderIcon('alert', 13)} Low margin — ${margin.toFixed(1)}% profit`
@@ -650,24 +601,20 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
       profitBar.innerHTML = `${renderIcon('check', 13)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB profit`
     }
   }
-}
 
   // ── Search ────────────────────────────────────────────────
-  const searchInput = container.querySelector('#pos-search')
-  const searchClear = container.querySelector('#pos-search-clear')
-
-  searchInput.addEventListener('input', e => {
+  container.querySelector('#pos-search').addEventListener('input', e => {
     searchQuery = e.target.value.trim()
-    searchClear.style.display = searchQuery ? '' : 'none'
+    container.querySelector('#pos-search-clear').style.display = searchQuery ? '' : 'none'
     renderProducts()
   })
 
-  searchClear.addEventListener('click', () => {
+  container.querySelector('#pos-search-clear').addEventListener('click', () => {
     searchQuery = ''
-    searchInput.value = ''
-    searchClear.style.display = 'none'
+    container.querySelector('#pos-search').value = ''
+    container.querySelector('#pos-search-clear').style.display = 'none'
     renderProducts()
-    searchInput.focus()
+    container.querySelector('#pos-search').focus()
   })
 
   // ── View toggle ───────────────────────────────────────────
@@ -688,7 +635,7 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
 
   // ── Clear cart ────────────────────────────────────────────
   container.querySelector('#btn-clear-cart').addEventListener('click', () => {
-    if (cart.length === 0) return
+    if (!cart.length) return
     if (!confirm('Clear the entire cart?')) return
     cart = []
     renderCart()
@@ -700,7 +647,7 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
     btn.addEventListener('click', () => {
       paymentMethod = btn.dataset.pay
       container.querySelectorAll('.pay-method-btn').forEach(b => b.classList.toggle('active', b.dataset.pay === paymentMethod))
-      container.querySelector('#credit-fields').style.display    = paymentMethod === 'credit' ? 'block' : 'none'
+      container.querySelector('#credit-fields').style.display     = paymentMethod === 'credit' ? 'block' : 'none'
       container.querySelector('#optional-customer').style.display = paymentMethod === 'credit' ? 'none'  : 'block'
     })
   })
@@ -709,23 +656,20 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
   container.querySelector('#btn-sell').addEventListener('click', () => handleSell(currentStore))
 
   async function handleSell(store) {
-    if (cart.length === 0) { showToast('Add at least one product', 'error'); return }
+    if (!cart.length) { showToast('Add at least one product', 'error'); return }
 
-    const subtotal   = cart.reduce((s, e) => s + e.qty * e.price, 0)
-    const discAmt    = subtotal * (discount / 100)
-    const total      = subtotal - discAmt
-    const isBulk     = container.querySelector('#bulk-toggle')?.checked
-    const accountId  = container.querySelector('#sale-account')?.value
-    const note       = container.querySelector('#sale-note')?.value.trim()
-    const isCredit   = paymentMethod === 'credit'
+    const subtotal  = cart.reduce((s, e) => s + e.qty * e.price, 0)
+    const discAmt   = subtotal * (discount / 100)
+    const total     = subtotal - discAmt
+    const isBulk    = container.querySelector('#bulk-toggle')?.checked
+    const accountId = container.querySelector('#sale-account')?.value
+    const note      = container.querySelector('#sale-note')?.value.trim()
+    const isCredit  = paymentMethod === 'credit'
 
-    // Validate credit
-    if (isCredit) {
-      const name = container.querySelector('#credit-name')?.value.trim()
-      if (!name) { showToast('Customer name required for credit sale', 'error'); return }
+    if (isCredit && !container.querySelector('#credit-name')?.value.trim()) {
+      showToast('Customer name required for credit sale', 'error'); return
     }
 
-    // Check for loss warning
     const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost) || 0), 0)
     if (total < totalCost) {
       if (!confirm(`⚠️ This sale results in a loss of ${fmt(totalCost - total)} ETB. Continue?`)) return
@@ -736,7 +680,6 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
     btn.disabled    = true
 
     try {
-      // 1. Create sale record
       const { data: sale, error: saleErr } = await supabase
         .from('sales')
         .insert({
@@ -748,12 +691,10 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
           source:          'manual',
           notes:           note || null,
         })
-        .select()
-        .single()
+        .select().single()
 
       if (saleErr) throw saleErr
 
-      // 2. Sale items + stock deduction
       for (const entry of cart) {
         await supabase.from('sale_items').insert({
           sale_id:            sale.id,
@@ -762,8 +703,6 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
           quantity:           entry.qty,
           unit_price:         entry.price,
         })
-
-        // Deduct stock unless bulk sale
         if (!isBulk) {
           await supabase.from('stock_movements').insert({
             store_id:      store?.id,
@@ -776,58 +715,33 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
         }
       }
 
-      // After all sale items inserted
-      await audit.salecompleted(sale, cart.map(e => ({
-        name: e.item.item_name, qty: e.qty, price: e.price
-      })))
+      await audit.salecompleted(sale, cart.map(e => ({ name: e.item.item_name, qty: e.qty, price: e.price })))
 
-      // 3. Credit sale record
       if (isCredit) {
         const custName  = container.querySelector('#credit-name').value.trim()
         const custPhone = container.querySelector('#credit-phone')?.value.trim() || null
-
-        let customer = customers.find(c => c.name.toLowerCase() === custName.toLowerCase())
+        let customer    = customers.find(c => c.name.toLowerCase() === custName.toLowerCase())
         if (!customer) {
           const { data } = await supabase.from('customers').insert({
-            store_id: store?.id,
-            name:     custName,
-            phone:    custPhone,
+            store_id: store?.id, name: custName, phone: custPhone,
           }).select().single()
           customer = data
           customers.push(customer)
         }
-
         await supabase.from('credit_sales').insert({
-          store_id:    store?.id,
-          sale_id:     sale.id,
-          customer_id: customer.id,
-          amount_owed: total,
-          status:      'unpaid',
+          store_id: store?.id, sale_id: sale.id,
+          customer_id: customer.id, amount_owed: total, status: 'unpaid',
         })
       }
 
-      // 4. Post journal entry
       try {
-        await postSaleEntry({
-          storeId:  store?.id,
-          saleId:   sale.id,
-          date:     new Date().toISOString().split('T')[0],
-          amount:   total,
-          isCredit,
-        })
+        await postSaleEntry({ storeId: store?.id, saleId: sale.id, date: new Date().toISOString().split('T')[0], amount: total, isCredit })
       } catch(e) { console.warn('Journal post skipped:', e.message) }
 
-      // 5. Show success
       showSaleSuccess(total, cart.length, sale.id)
-
-      // 6. Reset
       cart = []
       renderCart()
-      renderProducts()
-
       invalidateAfterSale()
-
-      // Reload inventory quantities
       const fresh = await getInventory()
       allItems = fresh || []
       renderProducts()
@@ -841,7 +755,6 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
     }
   }
 
-  // ── Success overlay ───────────────────────────────────────
   function showSaleSuccess(total, itemCount, saleId) {
     const overlay = document.createElement('div')
     overlay.style.cssText = `
@@ -855,11 +768,8 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
         text-align:center;max-width:320px;width:90%;
         box-shadow:var(--shadow-lg);animation:sale-pop 0.4s cubic-bezier(0.34,1.56,0.64,1);
       ">
-        <div style="
-          width:64px;height:64px;background:var(--teal-50);border-radius:50%;
-          display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;
-          color:var(--accent);
-        ">
+        <div style="width:64px;height:64px;background:var(--teal-50);border-radius:50%;
+          display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;color:var(--accent);">
           ${renderIcon('check', 28, 'var(--accent)')}
         </div>
         <div style="font-size:1.25rem;font-weight:700;margin-bottom:0.25rem">Sale Complete!</div>
@@ -870,48 +780,33 @@ container.querySelectorAll('[data-price-input]').forEach(input => {
           ${itemCount} item${itemCount!==1?'s':''} sold
         </div>
         <div style="display:flex;flex-direction:column;gap:0.5rem">
-          <button style="
-            width:100%;padding:0.75rem;
-            background:var(--bg-subtle);color:var(--dark);
-            border-radius:14px;font-weight:600;font-size:0.9375rem;
-            cursor:pointer;border:1.5px solid var(--border);
-            display:flex;align-items:center;justify-content:center;gap:0.5rem;
-          " id="btn-view-receipt">
+          <button style="width:100%;padding:0.75rem;background:var(--bg-subtle);color:var(--dark);
+            border-radius:14px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);
+            display:flex;align-items:center;justify-content:center;gap:0.5rem;" id="btn-view-receipt">
             ${renderIcon('reports', 16)} Receipt & Share
           </button>
-          <button style="
-            width:100%;padding:0.75rem;
-            background:var(--accent);color:#fff;border-radius:14px;
-            font-weight:600;font-size:0.9375rem;cursor:pointer;border:none;
-          " id="success-close">New Sale</button>
+          <button style="width:100%;padding:0.75rem;background:var(--accent);color:#fff;
+            border-radius:14px;font-weight:600;cursor:pointer;border:none;" id="success-close">
+            New Sale
+          </button>
         </div>
       </div>
     `
     document.body.appendChild(overlay)
-
-    overlay.querySelector('#btn-view-receipt').addEventListener('click', () => {
-      overlay.remove()
-      openReceiptModal(saleId)
-    })
-
+    overlay.querySelector('#btn-view-receipt').addEventListener('click', () => { overlay.remove(); openReceiptModal(saleId) })
     overlay.querySelector('#success-close').addEventListener('click', () => overlay.remove())
     setTimeout(() => { if (document.body.contains(overlay)) overlay.remove() }, 6000)
   }
 
-  // ── Init render ───────────────────────────────────────────
   renderCategories()
   renderProducts()
   renderCart()
 }
 
-// ── Helpers ──────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 const PAY_LABELS = {
-  cash:          'Cash',
-  bank_transfer: 'Bank',
-  telebirr:      'Telebirr',
-  cbe_birr:      'CBE Birr',
-  credit:        'Credit',
-  other:         'Other',
+  cash: 'Cash', bank_transfer: 'Bank', telebirr: 'Telebirr',
+  cbe_birr: 'CBE Birr', credit: 'Credit', other: 'Other',
 }
 
 function fmt(n) {
@@ -921,10 +816,8 @@ function fmt(n) {
 function highlight(text, query) {
   if (!query || !text) return text || ''
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return text.replace(
-    new RegExp(`(${escaped})`, 'gi'),
-    `<mark style="background:var(--teal-200);color:var(--teal-900);border-radius:2px;padding:0 1px">$1</mark>`
-  )
+  return text.replace(new RegExp(`(${escaped})`, 'gi'),
+    `<mark style="background:var(--teal-200);color:var(--teal-900);border-radius:2px;padding:0 1px">$1</mark>`)
 }
 
 function showToast(msg, type = 'info') {
@@ -937,712 +830,161 @@ function showToast(msg, type = 'info') {
   setTimeout(() => t.remove(), 3500)
 }
 
-// ── POS-specific styles ───────────────────────────────────────
 function injectPOSStyles() {
   if (document.getElementById('pos-styles')) return
   const style = document.createElement('style')
   style.id = 'pos-styles'
   style.textContent = `
     @keyframes sale-pop {
-      from { transform: scale(0.8); opacity: 0; }
-      to   { transform: scale(1);   opacity: 1; }
+      from { transform:scale(0.8);opacity:0; }
+      to   { transform:scale(1);  opacity:1; }
     }
-
     .pos-layout {
-      display: grid;
-      grid-template-columns: 1fr 380px;
-      gap: 1.25rem;
-      height: calc(100vh - 4rem);
-      max-height: 900px;
+      display:grid;grid-template-columns:1fr 380px;
+      gap:1.25rem;height:calc(100vh - 4rem);max-height:900px;
     }
-
-    .pos-left {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-      overflow: hidden;
-    }
-
+    .pos-left { display:flex;flex-direction:column;min-height:0;overflow:hidden; }
     .pos-right {
-      display: flex;
-      flex-direction: column;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
-      overflow: hidden;
-      box-shadow: var(--shadow-sm);
+      display:flex;flex-direction:column;
+      background:var(--bg-elevated);border:1px solid var(--border);
+      border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm);
     }
-
-    /* Search */
-    .pos-search-wrap {
-      margin-bottom: 0.875rem;
-    }
-
+    .pos-search-wrap { margin-bottom:0.875rem; }
     .pos-search-inner {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: var(--bg-elevated);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 0.5rem 0.875rem;
-      transition: border-color 0.15s, box-shadow 0.15s;
+      display:flex;align-items:center;gap:0.5rem;
+      background:var(--bg-elevated);border:1.5px solid var(--border);
+      border-radius:var(--radius-lg);padding:0.5rem 0.875rem;
+      transition:border-color 0.15s,box-shadow 0.15s;
     }
-
     .pos-search-inner:focus-within {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(13,148,136,0.1);
+      border-color:var(--accent);box-shadow:0 0 0 3px rgba(13,148,136,0.1);
     }
-
     .pos-search-input {
-      flex: 1;
-      border: none;
-      outline: none;
-      background: transparent;
-      font-size: 0.9375rem;
-      color: var(--dark);
+      flex:1;border:none;outline:none;background:transparent;
+      font-size:0.9375rem;color:var(--dark);
     }
-
-    .pos-search-clear {
-      color: var(--muted);
-      padding: 2px;
-      border-radius: 50%;
-      display: flex;
-      transition: all 0.15s;
-    }
-
-    .pos-search-clear:hover { background: var(--bg-hover); color: var(--dark); }
-
-    /* View toggle */
-    .view-toggle {
-      display: flex;
-      background: var(--bg-subtle);
-      border-radius: var(--radius);
-      padding: 2px;
-      gap: 2px;
-    }
-
-    .view-btn {
-      padding: 0.3rem 0.5rem;
-      border-radius: var(--radius-sm);
-      color: var(--muted);
-      transition: all 0.15s;
-      display: flex;
-      align-items: center;
-    }
-
-    .view-btn.active {
-      background: var(--bg-elevated);
-      color: var(--accent);
-      box-shadow: var(--shadow-xs);
-    }
-
-    /* Categories */
-    .pos-categories {
-      display: flex;
-      gap: 0.4rem;
-      flex-wrap: wrap;
-      margin-bottom: 0.875rem;
-    }
-
+    .pos-search-clear { color:var(--muted);padding:2px;border-radius:50%;display:flex;transition:all 0.15s; }
+    .pos-search-clear:hover { background:var(--bg-hover);color:var(--dark); }
+    .view-toggle { display:flex;background:var(--bg-subtle);border-radius:var(--radius);padding:2px;gap:2px; }
+    .view-btn { padding:0.3rem 0.5rem;border-radius:var(--radius-sm);color:var(--muted);transition:all 0.15s;display:flex;align-items:center; }
+    .view-btn.active { background:var(--bg-elevated);color:var(--accent);box-shadow:var(--shadow-xs); }
+    .pos-categories { display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.875rem; }
     .cat-chip {
-      padding: 0.3rem 0.875rem;
-      border-radius: var(--radius-pill);
-      font-size: 0.8125rem;
-      font-weight: 600;
-      border: 1.5px solid var(--border);
-      background: var(--bg-elevated);
-      color: var(--muted);
-      cursor: pointer;
-      transition: all 0.15s;
-      white-space: nowrap;
+      padding:0.3rem 0.875rem;border-radius:var(--radius-pill);font-size:0.8125rem;font-weight:600;
+      border:1.5px solid var(--border);background:var(--bg-elevated);color:var(--muted);
+      cursor:pointer;transition:all 0.15s;white-space:nowrap;
     }
-
-    .cat-chip:hover { border-color: var(--accent); color: var(--accent); }
-    .cat-chip.active {
-      background: var(--teal-50);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    /* Product grid */
-    .pos-products {
-      flex: 1;
-      overflow-y: auto;
-      padding-right: 2px;
-    }
-
-    .pos-products.grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 0.75rem;
-      align-content: start;
-    }
-
-    .pos-products.list { display: flex; flex-direction: column; }
-
-    .products-empty {
-      grid-column: 1/-1;
-      text-align: center;
-      padding: 3rem 1.5rem;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    /* Grid product card */
+    .cat-chip:hover { border-color:var(--accent);color:var(--accent); }
+    .cat-chip.active { background:var(--teal-50);border-color:var(--accent);color:var(--accent); }
+    .pos-products { flex:1;overflow-y:auto;padding-right:2px; }
+    .pos-products.grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.75rem;align-content:start; }
+    .pos-products.list { display:flex;flex-direction:column; }
+    .products-empty { grid-column:1/-1;text-align:center;padding:3rem 1.5rem;display:flex;flex-direction:column;align-items:center; }
     .product-card {
-      background: var(--bg-elevated);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius-lg);
-      cursor: pointer;
-      transition: all 0.18s;
-      position: relative;
-      overflow: hidden;
+      background:var(--bg-elevated);border:1.5px solid var(--border);
+      border-radius:var(--radius-lg);cursor:pointer;transition:all 0.18s;
+      position:relative;overflow:hidden;
     }
-
-    .product-card:hover {
-      border-color: var(--accent);
-      box-shadow: var(--shadow-sm);
-      transform: translateY(-2px);
-    }
-
-    .product-card.in-cart {
-      border-color: var(--accent);
-      background: var(--teal-50);
-    }
-
-    .product-card.out-of-stock {
-      opacity: 0.5;
-      pointer-events: none;
-    }
-
-    .product-card-inner {
-      padding: 0.875rem 0.75rem;
-    }
-
-    .product-icon-wrap {
-      width: 36px;
-      height: 36px;
-      background: var(--bg-subtle);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 0.5rem;
-    }
-
-    .product-card.in-cart .product-icon-wrap {
-      background: var(--teal-50);
-    }
-
-    .product-name {
-      font-size: 0.8125rem;
-      font-weight: 600;
-      color: var(--dark);
-      line-height: 1.3;
-      margin-bottom: 2px;
-    }
-
-    .product-cat {
-      font-size: 0.6875rem;
-      color: var(--muted);
-      margin-bottom: 0.4rem;
-    }
-
-    .product-price {
-      font-size: 0.9375rem;
-      font-weight: 700;
-      color: var(--accent);
-    }
-
-    .product-stock {
-      font-size: 0.6875rem;
-      font-weight: 600;
-      margin-top: 2px;
-    }
-
-    .product-stock.ok  { color: var(--success); }
-    .product-stock.out { color: var(--danger);  }
-
+    .product-card:hover { border-color:var(--accent);box-shadow:var(--shadow-sm);transform:translateY(-2px); }
+    .product-card.in-cart { border-color:var(--accent);background:var(--teal-50); }
+    .product-card.out-of-stock { opacity:0.5;pointer-events:none; }
+    .product-card-inner { padding:0.875rem 0.75rem; }
+    .product-icon-wrap { width:36px;height:36px;background:var(--bg-subtle);border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:0.5rem; }
+    .product-card.in-cart .product-icon-wrap { background:var(--teal-50); }
+    .product-name { font-size:0.8125rem;font-weight:600;color:var(--dark);line-height:1.3;margin-bottom:2px; }
+    .product-cat { font-size:0.6875rem;color:var(--muted);margin-bottom:0.4rem; }
+    .product-price { font-size:0.9375rem;font-weight:700;color:var(--accent); }
+    .product-stock { font-size:0.6875rem;font-weight:600;margin-top:2px; }
+    .product-stock.ok { color:var(--success); }
+    .product-stock.out { color:var(--danger); }
     .product-add-btn {
-      position: absolute;
-      bottom: 0.5rem;
-      right: 0.5rem;
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: var(--accent);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
-      box-shadow: 0 2px 6px rgba(13,148,136,0.3);
+      position:absolute;bottom:0.5rem;right:0.5rem;width:26px;height:26px;
+      border-radius:50%;background:var(--accent);color:#fff;
+      display:flex;align-items:center;justify-content:center;
+      transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+      box-shadow:0 2px 6px rgba(13,148,136,0.3);
     }
-
-    .product-add-btn.added {
-      background: var(--teal-50);
-      border: 1.5px solid var(--accent);
-    }
-
-    .product-add-btn:hover { transform: scale(1.15); }
-
-    /* List product row */
-    .product-list { display: flex; flex-direction: column; gap: 1px; }
-
-    .product-row {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.625rem 0.75rem;
-      border-radius: var(--radius);
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-
-    .product-row:hover { background: var(--bg-subtle); }
-    .product-row.in-cart { background: var(--teal-50); }
-    .product-row.out-of-stock { opacity: 0.5; pointer-events: none; }
-
-    .product-row-check {
-      width: 16px;
-      display: flex;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .product-row-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      border: 1.5px solid var(--border);
-      transition: all 0.15s;
-    }
-
-    .product-row-dot.active {
-      background: var(--accent);
-      border-color: var(--accent);
-    }
-
-    .product-row-info { flex: 1; min-width: 0; }
-
-    .product-row-name {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: var(--dark);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .product-row-meta {
-      display: flex;
-      gap: 0.5rem;
-      font-size: 0.75rem;
-      color: var(--muted);
-      margin-top: 1px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .product-row-meta span {
-      display: inline-flex;
-      align-items: center;
-      white-space: nowrap;
-    }
-
-    .product-row-meta span:not(:last-child)::after {
-      content: '·';
-      margin-left: 0.5rem;
-      color: var(--border);
-    }
-
-    .in-stock-text  { color: var(--success); font-weight: 600; }
-    .out-of-stock-text { color: var(--danger); font-weight: 600; }
-
-    .product-row-price {
-      font-size: 0.9375rem;
-      font-weight: 700;
-      color: var(--accent);
-      white-space: nowrap;
-    }
-
-    .product-row-add {
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: var(--accent);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
-    }
-
-    .product-row-add.added {
-      background: var(--teal-50);
-      border: 1.5px solid var(--accent);
-    }
-
-    .product-row-add:hover { transform: scale(1.15); }
-
-    /* Cart */
-    .pos-cart-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1rem 1.125rem;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .cart-count {
-      background: var(--accent);
-      color: #fff;
-      font-size: 0.6875rem;
-      font-weight: 700;
-      border-radius: 999px;
-      padding: 1px 6px;
-    }
-
-    .pos-cart-items {
-      flex: 1;
-      overflow-y: auto;
-      padding: 0.75rem;
-    }
-
-    .cart-empty {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      min-height: 160px;
-      padding: 2rem;
-    }
-
-    .cart-item {
-      background: var(--bg-subtle);
-      border-radius: var(--radius-lg);
-      padding: 0.75rem;
-      margin-bottom: 0.625rem;
-      border: 1px solid var(--border);
-    }
-
-    .cart-item-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 0.5rem;
-    }
-
-    .cart-item-name {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: var(--dark);
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .cart-remove {
-      color: var(--muted);
-      padding: 3px;
-      border-radius: 50%;
-      display: flex;
-      flex-shrink: 0;
-      transition: all 0.15s;
-    }
-
-    .cart-remove:hover { background: var(--red-50); color: var(--danger); }
-
-    .cart-item-controls {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .qty-control {
-      display: flex;
-      align-items: center;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-    }
-
-    .qty-btn {
-      padding: 0.3rem 0.5rem;
-      font-size: 1rem;
-      font-weight: 500;
-      color: var(--muted);
-      transition: all 0.15s;
-      line-height: 1;
-    }
-
-    .qty-btn:hover { background: var(--bg-hover); color: var(--dark); }
-
-    .qty-input {
-      width: 44px;
-      border: none;
-      text-align: center;
-      font-size: 0.875rem;
-      font-weight: 600;
-      background: transparent;
-      outline: none;
-      color: var(--dark);
-      padding: 0.3rem 0;
-      -moz-appearance: textfield;
-    }
-
-    .qty-input::-webkit-outer-spin-button,
-    .qty-input::-webkit-inner-spin-button { -webkit-appearance: none; }
-
-    .price-input-wrap {
-      display: flex;
-      align-items: center;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .price-prefix {
-      font-size: 0.75rem;
-      color: var(--muted);
-      padding: 0 0.375rem;
-      white-space: nowrap;
-    }
-
+    .product-add-btn.added { background:var(--teal-50);border:1.5px solid var(--accent); }
+    .product-add-btn:hover { transform:scale(1.15); }
+    .product-list { display:flex;flex-direction:column;gap:1px; }
+    .product-row { display:flex;align-items:center;gap:0.75rem;padding:0.625rem 0.75rem;border-radius:var(--radius);cursor:pointer;transition:all 0.15s; }
+    .product-row:hover { background:var(--bg-subtle); }
+    .product-row.in-cart { background:var(--teal-50); }
+    .product-row.out-of-stock { opacity:0.5;pointer-events:none; }
+    .product-row-check { width:16px;display:flex;align-items:center;flex-shrink:0; }
+    .product-row-dot { width:8px;height:8px;border-radius:50%;border:1.5px solid var(--border);transition:all 0.15s; }
+    .product-row-dot.active { background:var(--accent);border-color:var(--accent); }
+    .product-row-info { flex:1;min-width:0; }
+    .product-row-name { font-size:0.875rem;font-weight:600;color:var(--dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .product-row-meta { display:flex;gap:0.5rem;font-size:0.75rem;color:var(--muted);margin-top:1px;flex-wrap:wrap;align-items:center; }
+    .product-row-meta span { display:inline-flex;align-items:center;white-space:nowrap; }
+    .product-row-meta span:not(:last-child)::after { content:'·';margin-left:0.5rem;color:var(--border); }
+    .in-stock-text { color:var(--success);font-weight:600; }
+    .out-of-stock-text { color:var(--danger);font-weight:600; }
+    .product-row-price { font-size:0.9375rem;font-weight:700;color:var(--accent);white-space:nowrap; }
+    .product-row-add { width:26px;height:26px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1); }
+    .product-row-add.added { background:var(--teal-50);border:1.5px solid var(--accent); }
+    .product-row-add:hover { transform:scale(1.15); }
+    .pos-cart-header { display:flex;align-items:center;justify-content:space-between;padding:1rem 1.125rem;border-bottom:1px solid var(--border); }
+    .cart-count { background:var(--accent);color:#fff;font-size:0.6875rem;font-weight:700;border-radius:999px;padding:1px 6px; }
+    .pos-cart-items { flex:1;overflow-y:auto;padding:0.75rem; }
+    .cart-empty { display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:160px;padding:2rem; }
+    .cart-item { background:var(--bg-subtle);border-radius:var(--radius-lg);padding:0.75rem;margin-bottom:0.625rem;border:1px solid var(--border); }
+    .cart-item-top { display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem; }
+    .cart-item-name { font-size:0.875rem;font-weight:600;color:var(--dark);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    .cart-remove { color:var(--muted);padding:3px;border-radius:50%;display:flex;flex-shrink:0;transition:all 0.15s; }
+    .cart-remove:hover { background:var(--red-50);color:var(--danger); }
+    .cart-item-controls { display:flex;align-items:center;gap:0.5rem; }
+    .qty-control { display:flex;align-items:center;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden; }
+    .qty-btn { padding:0.3rem 0.5rem;font-size:1rem;font-weight:500;color:var(--muted);transition:all 0.15s;line-height:1; }
+    .qty-btn:hover { background:var(--bg-hover);color:var(--dark); }
+    .qty-input { width:44px;border:none;text-align:center;font-size:0.875rem;font-weight:600;background:transparent;outline:none;color:var(--dark);padding:0.3rem 0;-moz-appearance:textfield; }
+    .qty-input::-webkit-outer-spin-button,.qty-input::-webkit-inner-spin-button { -webkit-appearance:none; }
+    .price-input-wrap { display:flex;align-items:center;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;flex:1;min-width:0; }
+    .price-prefix { font-size:0.75rem;color:var(--muted);padding:0 0.375rem;white-space:nowrap; }
     .price-input {
-      flex: 1;
-      border: none;
-      outline: none;
-      background: transparent;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: var(--accent);
-      padding: 0.35rem 0.375rem 0.35rem 0;
-      min-width: 0;
-      -moz-appearance: textfield;
+      flex:1;border:none;outline:none;background:transparent;
+      font-size:0.875rem;font-weight:600;color:var(--accent);
+      padding:0.35rem 0.375rem 0.35rem 0;min-width:0;
+      -moz-appearance:textfield;
+      /* CRITICAL: prevents keyboard dismiss on iOS */
+      -webkit-user-select:text;user-select:text;
     }
-
-    .price-input.price-loss { color: var(--danger); }
-
-    .price-input::-webkit-outer-spin-button,
-    .price-input::-webkit-inner-spin-button { -webkit-appearance: none; }
-
-    .cart-line-total {
-      font-size: 0.875rem;
-      font-weight: 700;
-      color: var(--dark);
-      white-space: nowrap;
-      min-width: 70px;
-      text-align: right;
-    }
-
-    .loss-warning {
-      display: flex;
-      align-items: center;
-      gap: 0.3rem;
-      font-size: 0.75rem;
-      color: var(--danger);
-      margin-top: 0.4rem;
-      background: var(--red-50);
-      padding: 0.3rem 0.5rem;
-      border-radius: var(--radius-sm);
-    }
-
-    /* Totals */
-    .pos-totals {
-      padding: 0.875rem 1.125rem;
-      border-top: 1px solid var(--border);
-    }
-
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.25rem 0;
-      font-size: 0.875rem;
-    }
-
-    .total-label {
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-      color: var(--muted);
-    }
-
-    .total-val { font-weight: 600; color: var(--dark); }
-    .total-divider { border: none; border-top: 1px solid var(--border); margin: 0.4rem 0; }
-
-    .total-final {
-      font-size: 1rem;
-      font-weight: 700;
-      color: var(--dark);
-    }
-
-    .inline-input {
-      width: 44px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 1px 4px;
-      font-size: 0.8125rem;
-      text-align: center;
-      outline: none;
-      background: var(--bg-elevated);
-    }
-
-    .inline-input:focus { border-color: var(--accent); }
-
-    .profit-bar {
-      display: flex;
-      align-items: center;
-      gap: 0.3rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 0.35rem 0.5rem;
-      border-radius: var(--radius);
-      margin-top: 0.5rem;
-    }
-
-    .profit-bar.ok   { background: var(--green-50); color: #15803D; }
-    .profit-bar.low  { background: var(--amber-50); color: #92400E; }
-    .profit-bar.loss { background: var(--red-50);   color: #991B1B; }
-
-    /* Checkout */
-    .pos-checkout {
-      padding: 0.875rem 1.125rem;
-      border-top: 1px solid var(--border);
-      background: var(--bg-subtle);
-    }
-
-    .pay-methods {
-      display: flex;
-      gap: 0.375rem;
-      flex-wrap: wrap;
-    }
-
-    .pay-method-btn {
-      padding: 0.3rem 0.75rem;
-      border-radius: var(--radius-pill);
-      font-size: 0.8125rem;
-      font-weight: 600;
-      border: 1.5px solid var(--border);
-      background: var(--bg-elevated);
-      color: var(--muted);
-      cursor: pointer;
-      transition: all 0.15s;
-      white-space: nowrap;
-    }
-
-    .pay-method-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-    .pay-method-btn.active {
-      background: var(--teal-50);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .credit-banner {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.8125rem;
-      font-weight: 600;
-      color: #92400E;
-      background: var(--amber-50);
-      border: 1px solid #FDE68A;
-      border-radius: var(--radius);
-      padding: 0.5rem 0.75rem;
-    }
-
-    .optional-summary {
-      font-size: 0.8125rem;
-      color: var(--muted);
-      cursor: pointer;
-      padding: 0.25rem 0;
-      font-weight: 500;
-      user-select: none;
-    }
-
-    .optional-summary:hover { color: var(--dark); }
-
-    .btn-sell {
-      width: 100%;
-      justify-content: center;
-      padding: 0.75rem;
-      font-size: 0.9375rem;
-      border-radius: var(--radius-lg);
-      gap: 0.5rem;
-      letter-spacing: -0.1px;
-    }
-
-    /* Mobile POS */
-    @media (max-width: 768px) {
-      .pos-layout {
-        grid-template-columns: 1fr;
-        height: auto;
-        max-height: none;
-        gap: 0;
-      }
-
-      .pos-left {
-        padding-bottom: 80px;
-      }
-
-      /* Cart as bottom sheet on mobile */
-      .pos-right {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        z-index: 250;
-        border-radius: 24px 24px 0 0;
-        border: none;
-        border-top: 1px solid var(--border);
-        max-height: 85dvh;
-        transform: translateY(100%);
-        transition: transform 0.35s cubic-bezier(0.32,0.72,0,1);
-        background: var(--bg-elevated);
-        display: flex !important;
-      }
-
-      .pos-right.open {
-        transform: translateY(0);
-      }
-
-      /* Drag handle */
-      .pos-cart-header::before {
-        content: '';
-        position: absolute;
-        top: 8px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 36px;
-        height: 4px;
-        background: var(--border);
-        border-radius: 999px;
-      }
-
-      .pos-cart-header {
-        position: relative;
-        cursor: pointer;
-      }
-
-      .pos-cart-items {
-        max-height: 40dvh;
-      }
-
-      .pos-products.grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-      }
+    .price-input.price-loss { color:var(--danger); }
+    .price-input::-webkit-outer-spin-button,.price-input::-webkit-inner-spin-button { -webkit-appearance:none; }
+    .cart-line-total { font-size:0.875rem;font-weight:700;color:var(--dark);white-space:nowrap;min-width:70px;text-align:right; }
+    .loss-warning { display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;color:var(--danger);margin-top:0.4rem;background:var(--red-50);padding:0.3rem 0.5rem;border-radius:var(--radius-sm); }
+    .pos-totals { padding:0.875rem 1.125rem;border-top:1px solid var(--border); }
+    .total-row { display:flex;justify-content:space-between;align-items:center;padding:0.25rem 0;font-size:0.875rem; }
+    .total-label { display:flex;align-items:center;gap:0.35rem;color:var(--muted); }
+    .total-val { font-weight:600;color:var(--dark); }
+    .total-divider { border:none;border-top:1px solid var(--border);margin:0.4rem 0; }
+    .total-final { font-size:1rem;font-weight:700;color:var(--dark); }
+    .inline-input { width:44px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1px 4px;font-size:0.8125rem;text-align:center;outline:none;background:var(--bg-elevated); }
+    .inline-input:focus { border-color:var(--accent); }
+    .profit-bar { display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;font-weight:600;padding:0.35rem 0.5rem;border-radius:var(--radius);margin-top:0.5rem; }
+    .profit-bar.ok   { background:var(--green-50);color:#15803D; }
+    .profit-bar.low  { background:var(--amber-50);color:#92400E; }
+    .profit-bar.loss { background:var(--red-50);  color:#991B1B; }
+    .pos-checkout { padding:0.875rem 1.125rem;border-top:1px solid var(--border);background:var(--bg-subtle);overflow-y:auto; }
+    .pay-methods { display:flex;gap:0.375rem;flex-wrap:wrap; }
+    .pay-method-btn { padding:0.3rem 0.75rem;border-radius:var(--radius-pill);font-size:0.8125rem;font-weight:600;border:1.5px solid var(--border);background:var(--bg-elevated);color:var(--muted);cursor:pointer;transition:all 0.15s;white-space:nowrap; }
+    .pay-method-btn:hover { border-color:var(--accent);color:var(--accent); }
+    .pay-method-btn.active { background:var(--teal-50);border-color:var(--accent);color:var(--accent); }
+    .credit-banner { display:flex;align-items:center;gap:0.4rem;font-size:0.8125rem;font-weight:600;color:#92400E;background:var(--amber-50);border:1px solid #FDE68A;border-radius:var(--radius);padding:0.5rem 0.75rem; }
+    .optional-summary { font-size:0.8125rem;color:var(--muted);cursor:pointer;padding:0.25rem 0;font-weight:500;user-select:none; }
+    .optional-summary:hover { color:var(--dark); }
+    .btn-sell { width:100%;justify-content:center;padding:0.75rem;font-size:0.9375rem;border-radius:var(--radius-lg);gap:0.5rem; }
+    @media (max-width:768px) {
+      .pos-layout { grid-template-columns:1fr;height:auto;max-height:none;gap:0; }
+      .pos-left { padding-bottom:80px; }
+      .pos-right { position:fixed;bottom:0;left:0;right:0;z-index:250;border-radius:24px 24px 0 0;border:none;border-top:1px solid var(--border);max-height:85dvh;transform:translateY(100%);transition:transform 0.35s cubic-bezier(0.32,0.72,0,1);background:var(--bg-elevated);display:flex !important; }
+      .pos-right.open { transform:translateY(0); }
+      .pos-cart-header::before { content:'';position:absolute;top:8px;left:50%;transform:translateX(-50%);width:36px;height:4px;background:var(--border);border-radius:999px; }
+      .pos-cart-header { position:relative;cursor:pointer; }
+      .pos-cart-items { max-height:40dvh; }
+      .pos-products.grid { grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); }
     }
   `
   document.head.appendChild(style)
-}}
+}
