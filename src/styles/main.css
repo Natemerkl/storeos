@@ -907,14 +907,13 @@ body.lite-mode .page-sub::after {
 
 .mobile-nav-item.active .m-label { color: var(--accent); }
 
-/* FAB Camera */
 .fab-camera {
+  display: none;
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom,0px) + 88px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 300;
-  display: none;
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -934,6 +933,8 @@ body.lite-mode .page-sub::after {
   justify-content: center;
   color: var(--accent);
 }
+
+#mobile-menu-btn { display: none; }
 
 .fab-camera:active {
   transform: translateX(-50%) scale(0.9);

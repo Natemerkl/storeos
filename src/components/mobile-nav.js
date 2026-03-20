@@ -408,6 +408,11 @@ export function initMobileNav() {
   renderNav()
   updateVisibility()
 
+  // Also re-check after any dynamic navigation
+  document.addEventListener('click', () => {
+    setTimeout(updateVisibility, 50)
+  })
+
   return { renderNav, updateVisibility }
 }
 

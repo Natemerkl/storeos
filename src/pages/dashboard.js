@@ -9,8 +9,31 @@ export async function render(container) {
 
   if (isLite) { await renderLite(container); return }
 
-  // ── 1. Paint skeleton instantly ───────────────────────────
-  container.innerHTML = `
+  // Paint skeleton
+  container.innerHTML = buildSkeleton(currentStore, accountingView)
+  injectSkeletonStyles()
+
+  // Create a "is this render still active" check
+  const renderToken = Symbol()
+  container._renderToken = renderToken
+
+  const isStale = () => container._renderToken !== renderToken || !document.body.contains(container)
+
+  const data = await getDashboardData()
+  if (isStale()) return  // user navigated away
+
+  fillDashboard(container, data, isStale)
+
+  container.querySelector('#btn-refresh')?.addEventListener('click', async () => {
+    if (isStale()) return
+    const fresh = await getDashboardData(true)
+    if (isStale()) return
+    fillDashboard(container, fresh, isStale)
+  })
+}
+
+function buildSkeleton(currentStore, accountingView) {
+  return `
     <div class="page-header">
       <div>
         <div class="page-title">Dashboard</div>
@@ -20,74 +43,66 @@ export async function render(container) {
         ${renderIcon('refresh', 14)} Refresh
       </button>
     </div>
-
-    <!-- KPI skeleton -->
     <div class="kpi-grid" id="kpi-grid">
       ${[1,2,3,4].map(() => `
         <div class="kpi-card">
-          <div class="skeleton" style="height:12px;width:60%;margin-bottom:8px;border-radius:4px"></div>
-          <div class="skeleton" style="height:28px;width:80%;border-radius:4px"></div>
+          <div class="skeleton" style="height:11px;width:55%;margin-bottom:8px;border-radius:4px"></div>
+          <div class="skeleton" style="height:32px;width:75%;border-radius:4px"></div>
         </div>
       `).join('')}
     </div>
-
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
-      <div class="card" id="cash-positions">
-        <div style="font-weight:600;margin-bottom:1rem">💰 Cash Positions</div>
+      <div class="card" id="cash-card">
+        <div style="font-weight:600;margin-bottom:1rem">Cash Positions</div>
         <div id="cash-list">
-          ${[1,2,3].map(() => `
+          ${[1,2].map(() => `
             <div style="display:flex;justify-content:space-between;padding:0.6rem 0;border-bottom:1px solid var(--border)">
-              <div class="skeleton" style="height:14px;width:40%;border-radius:4px"></div>
-              <div class="skeleton" style="height:14px;width:25%;border-radius:4px"></div>
+              <div class="skeleton" style="height:13px;width:40%;border-radius:4px"></div>
+              <div class="skeleton" style="height:13px;width:22%;border-radius:4px"></div>
             </div>
           `).join('')}
         </div>
       </div>
-      <div class="card" id="low-stock-card">
-        <div style="font-weight:600;margin-bottom:1rem">⚠️ Low Stock Alerts</div>
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:1rem">Low Stock Alerts</div>
         <div id="low-stock-list">
-          <div class="skeleton" style="height:14px;width:70%;border-radius:4px;margin-bottom:8px"></div>
-          <div class="skeleton" style="height:14px;width:50%;border-radius:4px"></div>
+          <div class="skeleton" style="height:13px;width:65%;border-radius:4px;margin-bottom:8px"></div>
+          <div class="skeleton" style="height:13px;width:45%;border-radius:4px"></div>
         </div>
       </div>
     </div>
-
     <div class="card" style="margin-top:1rem">
-      <div style="font-weight:600;margin-bottom:1rem">🕒 Recent Activity</div>
+      <div style="font-weight:600;margin-bottom:1rem">Recent Activity</div>
       <div id="activity-list">
         ${[1,2,3].map(() => `
           <div style="display:flex;justify-content:space-between;padding:0.65rem 0;border-bottom:1px solid var(--border)">
-            <div class="skeleton" style="height:14px;width:45%;border-radius:4px"></div>
-            <div class="skeleton" style="height:14px;width:20%;border-radius:4px"></div>
+            <div class="skeleton" style="height:13px;width:42%;border-radius:4px"></div>
+            <div class="skeleton" style="height:13px;width:18%;border-radius:4px"></div>
           </div>
         `).join('')}
       </div>
     </div>
   `
-
-  // ── 2. Add skeleton styles ────────────────────────────────
-  injectSkeletonStyles()
-
-  // ── 3. Load data (cached — usually instant on revisit) ────
-  const data = await getDashboardData()
-  fillDashboard(container, data)
-
-  // ── 4. Refresh button ─────────────────────────────────────
-  container.querySelector('#btn-refresh').addEventListener('click', async () => {
-    const fresh = await getDashboardData(true)
-    fillDashboard(container, fresh)
-  })
 }
 
-function fillDashboard(container, data) {
-  const { totalCash, todaySales, todayExpenses, accounts,
-          inventoryItems, recentSales, recentExpenses } = normalizeData(data)
+function fillDashboard(container, data, isStale) {
+  if (isStale?.()) return
+
+  const get = (id) => container.querySelector(id)
+  if (!get('#kpi-grid')) return
+
+  const accounts      = data.accounts      || []
+  const todaySales    = data.todaySales    || 0
+  const todayExpenses = data.todayExpenses || 0
+  const items         = data.inventoryItems || []
+  const recentSales   = data.recentSales   || []
+  const recentExpenses= data.recentExpenses|| []
 
   const profit = todaySales - todayExpenses
-  const invVal = inventoryItems.reduce((s,i) => s + Number(i.quantity) * Number(i.unit_cost||0), 0)
+  const invVal = items.reduce((s,i) => s + Number(i.quantity) * Number(i.unit_cost||0), 0)
 
-  // KPIs
-  container.querySelector('#kpi-grid').innerHTML = `
+  if (isStale?.()) return
+  get('#kpi-grid').innerHTML = `
     <div class="kpi-card">
       <div class="kpi-label">Today's Sales</div>
       <div class="kpi-value accent">${fmt(todaySales)}</div>
@@ -100,8 +115,9 @@ function fillDashboard(container, data) {
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Today's Profit</div>
-      <div class="kpi-value ${profit >= 0 ? 'accent' : ''}"
-           style="${profit < 0 ? 'color:var(--danger)' : ''}">${fmt(profit)}</div>
+      <div class="kpi-value ${profit>=0?'accent':''}" style="${profit<0?'color:var(--danger)':''}">
+        ${fmt(profit)}
+      </div>
       <div class="kpi-sub">ETB</div>
     </div>
     <div class="kpi-card">
@@ -111,15 +127,16 @@ function fillDashboard(container, data) {
     </div>
   `
 
-  // Cash positions
+  if (isStale?.()) return
   const total = accounts.reduce((s,a) => s + Number(a.balance), 0)
-  container.querySelector('#cash-list').innerHTML = `
+  const cashEl = get('#cash-list')
+  if (cashEl) cashEl.innerHTML = `
     ${accounts.map(a => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border)">
         <div>
           <div style="font-weight:500;font-size:13.5px">${a.name}</div>
           <div style="font-size:11.5px;color:var(--muted)">
-            ${a.account_type === 'till' ? '🏪 Till' : '🏦 Bank'} · ${a.stores?.name ?? ''}
+            ${a.account_type==='till'?'🏪 Till':'🏦 Bank'} · ${a.stores?.name??''}
           </div>
         </div>
         <div style="font-weight:700;color:var(--accent)">${fmt(a.balance)} ETB</div>
@@ -131,51 +148,41 @@ function fillDashboard(container, data) {
     </div>
   `
 
-  // Low stock
-  const low = inventoryItems.filter(i => Number(i.quantity) <= Number(i.low_stock_threshold || 5))
-  container.querySelector('#low-stock-list').innerHTML = low.length === 0
-    ? `<div class="empty"><div class="empty-icon">${renderIcon('check', 24, 'var(--success)')}</div><div class="empty-text">All items stocked</div></div>`
+  if (isStale?.()) return
+  const low = items.filter(i => Number(i.quantity) <= Number(i.low_stock_threshold||5))
+  const lowEl = get('#low-stock-list')
+  if (lowEl) lowEl.innerHTML = low.length === 0
+    ? `<div class="empty"><div class="empty-icon">${renderIcon('check',24,'var(--success)')}</div><div class="empty-text">All items stocked</div></div>`
     : low.map(i => `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border)">
           <div style="font-size:13.5px;font-weight:500">${i.item_name}</div>
-          <span class="badge ${Number(i.quantity) === 0 ? 'badge-red' : 'badge-yellow'}">${i.quantity} left</span>
+          <span class="badge ${Number(i.quantity)===0?'badge-red':'badge-yellow'}">${i.quantity} left</span>
         </div>
       `).join('')
 
-  // Recent activity
+  if (isStale?.()) return
   const combined = [
-    ...(recentSales||[]).map(s => ({ type:'sale', amount: s.total_amount, label:'Sale recorded', date: s.created_at })),
-    ...(recentExpenses||[]).map(e => ({ type:'expense', amount: e.amount, label: e.description || 'Expense', date: e.created_at })),
-  ].sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0,8)
+    ...(recentSales||[]).map(s=>({type:'sale',amount:s.total_amount,label:'Sale recorded',date:s.created_at})),
+    ...(recentExpenses||[]).map(e=>({type:'expense',amount:e.amount,label:e.description||'Expense',date:e.created_at})),
+  ].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,8)
 
-  container.querySelector('#activity-list').innerHTML = combined.length === 0
+  const actEl = get('#activity-list')
+  if (actEl) actEl.innerHTML = combined.length===0
     ? `<div class="empty"><div class="empty-text">No activity yet</div></div>`
-    : combined.map(a => `
+    : combined.map(a=>`
         <div style="display:flex;justify-content:space-between;align-items:center;padding:0.65rem 0;border-bottom:1px solid var(--border)">
           <div style="display:flex;align-items:center;gap:0.75rem">
-            <span style="font-size:1.1rem">${a.type === 'sale' ? '💚' : '🔴'}</span>
+            <span style="font-size:1.1rem">${a.type==='sale'?'💚':'🔴'}</span>
             <div>
               <div style="font-size:13.5px;font-weight:500">${a.label}</div>
               <div style="font-size:11.5px;color:var(--muted)">${timeAgo(a.date)}</div>
             </div>
           </div>
-          <div style="font-weight:600;color:${a.type === 'sale' ? 'var(--accent)' : 'var(--danger)'}">
-            ${a.type === 'sale' ? '+' : '-'}${fmt(a.amount)} ETB
+          <div style="font-weight:600;color:${a.type==='sale'?'var(--accent)':'var(--danger)'}">
+            ${a.type==='sale'?'+':'-'}${fmt(a.amount)} ETB
           </div>
         </div>
       `).join('')
-}
-
-function normalizeData(data) {
-  return {
-    accounts:       data.accounts       || [],
-    todaySales:     data.todaySales      || 0,
-    todayExpenses:  data.todayExpenses   || 0,
-    inventoryItems: data.inventoryItems  || [],
-    recentSales:    data.recentSales     || [],
-    recentExpenses: data.recentExpenses  || [],
-    totalCash: (data.accounts||[]).reduce((s,a) => s + Number(a.balance), 0),
-  }
 }
 
 async function renderLite(container) {

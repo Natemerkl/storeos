@@ -44,12 +44,17 @@ export async function loadPage(pageName) {
 let layoutBuilt = false
 
 export function buildLayout() {
-  if (layoutBuilt) {
-    // Layout exists — just re-render nav with fresh store data
-    if (navEl) renderNav(navEl)
+  // Check if layout actually exists in DOM, not just our flag
+  const navExists = document.querySelector('.sidebar')
+  const contentExists = document.querySelector('.main-content')
+
+  if (navExists && contentExists) {
+    // Layout exists — just refresh nav data
+    renderNav(navEl || navExists)
     return
   }
 
+  // Build fresh
   layoutBuilt = true
   app.innerHTML = ''
 
@@ -67,7 +72,7 @@ export function buildLayout() {
 }
 
 export function buildFullScreen() {
-  layoutBuilt = false  // reset so layout rebuilds on next login
+  layoutBuilt = false
   app.innerHTML = ''
   navEl     = null
   contentEl = document.createElement('div')
