@@ -23,40 +23,37 @@ const ALL_NAV_ITEMS = [
   { path:'/ocr',          icon:'scan',         label:'Scan Receipt'    },
   { path:'/reports',      icon:'reports',      label:'Reports'         },
   { path:'/settings',     icon:'settings',     label:'Settings'        },
+  { path:'/audit',        icon:'reports',      label:'Audit Log'       },
 ]
 
+const HIDDEN_ROUTES = new Set(['/auth', '/onboarding'])
 
 export function initMobileNav() {
 
-  // ── Bottom Nav ───────────────────────────────────────────────
+  // ── Elements ───────────────────────────────────────────────
   const nav = document.createElement('div')
   nav.className = 'mobile-nav'
   nav.id = 'mobile-nav'
 
-  // ── FAB Camera ───────────────────────────────────────────────
   const fab = document.createElement('button')
   fab.className = 'fab-camera'
   fab.id = 'fab-camera'
   fab.setAttribute('aria-label', 'Scan receipt')
+  fab.setAttribute('role', 'button')
   fab.innerHTML = Icons.camera?.(24) || ''
 
-  // ── Sidebar drawer ────────────────────────────────────────────
+  // ── Drawer ─────────────────────────────────────────────────
   const drawer = document.createElement('div')
   drawer.id = 'mobile-drawer'
   drawer.style.cssText = `
-    position:fixed;inset:0;z-index:500;
-    pointer-events:none;
+    position:fixed;inset:0;z-index:500;pointer-events:none;
   `
   drawer.innerHTML = `
-    <!-- Backdrop -->
     <div id="drawer-backdrop" style="
       position:absolute;inset:0;
       background:rgba(0,0,0,0);
-      backdrop-filter:blur(0px);
-      transition:background 0.3s,backdrop-filter 0.3s;
+      transition:background 0.3s ease;
     "></div>
-
-    <!-- Panel -->
     <div id="drawer-panel" style="
       position:absolute;top:0;right:0;bottom:0;
       width:min(320px,85vw);
@@ -64,17 +61,27 @@ export function initMobileNav() {
       transform:translateX(100%);
       transition:transform 0.35s cubic-bezier(0.32,0.72,0,1);
       display:flex;flex-direction:column;
+      box-shadow:-20px 0 60px rgba(0,0,0,0.25);
       overflow:hidden;
-      box-shadow:-20px 0 60px rgba(0,0,0,0.2);
+      /* Safe area on right edge */
+      padding-right:var(--safe-right,0px);
     ">
-      <!-- Drawer header -->
+      <!-- Handle bar -->
+      <div style="
+        position:absolute;left:-20px;top:50%;transform:translateY(-50%);
+        width:4px;height:48px;border-radius:999px;
+        background:rgba(255,255,255,0.2);
+      "></div>
+
+      <!-- Header -->
       <div style="
         display:flex;align-items:center;justify-content:space-between;
-        padding:1.25rem 1.25rem 0.75rem;
+        padding:calc(var(--safe-top,0px) + 16px) 20px 16px;
         border-bottom:1px solid rgba(255,255,255,0.07);
+        flex-shrink:0;
       ">
         <div style="
-          display:flex;align-items:center;gap:0.5rem;
+          display:flex;align-items:center;gap:8px;
           font-size:1.1rem;font-weight:700;color:#fff;letter-spacing:-0.3px;
         ">
           <div style="
@@ -83,81 +90,102 @@ export function initMobileNav() {
           ">${renderIcon('store', 14, '#fff')}</div>
           Store<span style="color:var(--teal-500,#14B8A6)">OS</span>
         </div>
-        <button id="drawer-close" style="
-          width:32px;height:32px;border-radius:50%;
+        <button id="drawer-close" aria-label="Close menu" style="
+          width:36px;height:36px;border-radius:50%;
           background:rgba(255,255,255,0.08);
+          border:1px solid rgba(255,255,255,0.1);
           display:flex;align-items:center;justify-content:center;
-          color:rgba(255,255,255,0.6);cursor:pointer;border:none;
+          color:rgba(255,255,255,0.7);cursor:pointer;
           transition:all 0.15s;
-        ">${renderIcon('close', 15)}</button>
+          touch-action:manipulation;
+        ">${renderIcon('close', 16)}</button>
       </div>
 
       <!-- Store switcher -->
       <div id="drawer-store-switcher" style="
-        padding:0.75rem 1.25rem;
+        padding:12px 20px;
         border-bottom:1px solid rgba(255,255,255,0.07);
+        flex-shrink:0;
       "></div>
 
       <!-- Nav items -->
-      <nav style="flex:1;overflow-y:auto;padding:0.5rem 0.75rem">
+      <nav style="flex:1;overflow-y:auto;padding:8px 12px;
+        -webkit-overflow-scrolling:touch;" aria-label="Main navigation">
         <div style="
-          font-size:0.625rem;font-weight:700;color:rgba(255,255,255,0.28);
+          font-size:10px;font-weight:700;color:rgba(255,255,255,0.28);
           letter-spacing:1.2px;text-transform:uppercase;
-          padding:0.75rem 0.5rem 0.35rem;
+          padding:12px 8px 6px;
         ">Menu</div>
         ${ALL_NAV_ITEMS.map(item => `
-          <div class="drawer-nav-item" data-path="${item.path}" style="
-            display:flex;align-items:center;gap:0.625rem;
-            padding:0.6rem 0.625rem;border-radius:var(--radius);
-            color:rgba(255,255,255,0.58);font-size:0.9rem;font-weight:500;
-            margin-bottom:1px;cursor:pointer;transition:all 0.15s;
-          ">
-            <div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <div class="drawer-nav-item" data-path="${item.path}"
+            role="button" tabindex="0"
+            aria-label="${item.label}"
+            style="
+              display:flex;align-items:center;gap:10px;
+              padding:10px 10px;border-radius:10px;
+              color:rgba(255,255,255,0.58);font-size:0.9rem;font-weight:500;
+              margin-bottom:2px;cursor:pointer;
+              transition:background 0.15s,color 0.15s;
+              min-height:44px;
+              touch-action:manipulation;
+              -webkit-tap-highlight-color:transparent;
+            ">
+            <div style="width:20px;height:20px;display:flex;align-items:center;
+              justify-content:center;flex-shrink:0;">
               ${Icons[item.icon]?.(17) || ''}
             </div>
-            ${item.label}
+            <span>${item.label}</span>
           </div>
         `).join('')}
       </nav>
 
-      <!-- Drawer footer -->
+      <!-- Footer -->
       <div style="
-        padding:0.875rem 1.25rem;
+        padding:12px 20px;
+        padding-bottom:calc(var(--safe-bottom,0px) + 16px);
         border-top:1px solid rgba(255,255,255,0.07);
-        display:flex;flex-direction:column;gap:0.5rem;
+        flex-shrink:0;
       ">
         <!-- Mode toggle -->
-        <div id="drawer-mode-toggle" style="
-          display:flex;align-items:center;justify-content:space-between;
-          padding:0.5rem 0.625rem;border-radius:var(--radius);
-          background:rgba(255,255,255,0.05);cursor:pointer;
-        ">
+        <div id="drawer-mode-toggle" role="button" tabindex="0"
+          aria-label="Toggle Lite/Pro mode"
+          style="
+            display:flex;align-items:center;justify-content:space-between;
+            padding:10px 12px;border-radius:10px;
+            background:rgba(255,255,255,0.05);
+            cursor:pointer;margin-bottom:8px;
+            min-height:44px;touch-action:manipulation;
+            -webkit-tap-highlight-color:transparent;
+          ">
           <span style="font-size:0.875rem;font-weight:500;color:rgba(255,255,255,0.6)">
             Lite Mode
           </span>
           <div id="drawer-mode-pill" style="
-            width:36px;height:20px;border-radius:999px;
-            background:rgba(255,255,255,0.15);position:relative;
-            transition:background 0.2s;
+            width:40px;height:22px;border-radius:999px;
+            background:rgba(255,255,255,0.15);
+            position:relative;transition:background 0.2s;
           ">
-            <div style="
-              position:absolute;top:2px;left:2px;
+            <div id="drawer-mode-dot" style="
+              position:absolute;top:3px;left:3px;
               width:16px;height:16px;border-radius:50%;
               background:#fff;transition:transform 0.2s;
               box-shadow:0 1px 3px rgba(0,0,0,0.2);
-            " id="drawer-mode-dot"></div>
+            "></div>
           </div>
         </div>
 
         <!-- Sign out -->
-        <button id="drawer-signout" style="
-          display:flex;align-items:center;gap:0.5rem;
-          padding:0.5rem 0.625rem;border-radius:var(--radius);
-          color:rgba(255,255,255,0.35);font-size:0.875rem;font-weight:500;
-          cursor:pointer;border:none;background:none;width:100%;
-          transition:all 0.15s;
-        ">
-          ${renderIcon('logout', 15, 'currentColor')}
+        <button id="drawer-signout"
+          aria-label="Sign out"
+          style="
+            display:flex;align-items:center;gap:8px;
+            padding:10px 12px;border-radius:10px;
+            color:rgba(255,255,255,0.4);font-size:0.875rem;font-weight:500;
+            cursor:pointer;border:none;background:none;width:100%;
+            transition:all 0.15s;min-height:44px;
+            touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+          ">
+          ${renderIcon('logout', 16, 'currentColor')}
           Sign out
         </button>
       </div>
@@ -168,38 +196,48 @@ export function initMobileNav() {
   document.body.appendChild(nav)
   document.body.appendChild(fab)
 
-  // ── Hide on auth/onboarding pages ──────────────────────────
-  const HIDDEN_ROUTES = ['/auth', '/onboarding']
-
-  function shouldHide() {
-    return HIDDEN_ROUTES.includes(window.location.pathname)
+  // ── Visibility ─────────────────────────────────────────────
+  function isHiddenRoute() {
+    return HIDDEN_ROUTES.has(window.location.pathname)
   }
 
   function updateVisibility() {
-    const hidden = shouldHide()
-    nav.style.display = hidden ? 'none' : (window.innerWidth <= 768 ? 'block' : 'none')
-    fab.style.display = hidden ? 'none' : (window.innerWidth <= 768 ? 'flex'  : 'none')
+    const hidden = isHiddenRoute()
+    const mobile = window.innerWidth <= 768
+
+    const show = !hidden && mobile
+    nav.style.display = show ? 'block' : 'none'
+    fab.style.display = show ? 'flex'  : 'none'
+
+    if (!show && drawerOpen) closeDrawer()
   }
 
-  // ── Render bottom nav ────────────────────────────────────────
+  // ── Render bottom nav ──────────────────────────────────────
   function renderNav() {
     const path = window.location.pathname
     nav.innerHTML = `
       <div class="mobile-nav-glass">
         ${MOBILE_ITEMS.map(item => `
-          <div class="mobile-nav-item ${path === item.path ? 'active' : ''}" data-path="${item.path}">
+          <div class="mobile-nav-item ${path === item.path ? 'active' : ''}"
+               data-path="${item.path}"
+               role="button"
+               tabindex="0"
+               aria-label="${item.label}"
+               aria-current="${path === item.path ? 'page' : 'false'}">
             <div class="m-icon">${Icons[item.icon]?.(22) || ''}</div>
             <span class="m-label">${item.label}</span>
           </div>
         `).join('')}
-
-        <!-- Menu button — inside nav bar, right side -->
-        <div class="mobile-nav-item" id="nav-menu-btn">
+        <!-- Menu button — inside nav bar -->
+        <div class="mobile-nav-item" id="nav-menu-btn"
+             role="button" tabindex="0" aria-label="Open menu"
+             aria-expanded="false" aria-haspopup="true">
           <div class="m-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
-              <line x1="4" y1="6" x2="20" y2="6"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+              <line x1="4" y1="7"  x2="20" y2="7"/>
               <line x1="4" y1="12" x2="20" y2="12"/>
-              <line x1="4" y1="18" x2="20" y2="18"/>
+              <line x1="4" y1="17" x2="20" y2="17"/>
             </svg>
           </div>
           <span class="m-label">Menu</span>
@@ -207,34 +245,41 @@ export function initMobileNav() {
       </div>
     `
 
+    // Nav item clicks
     nav.querySelectorAll('.mobile-nav-item[data-path]').forEach(el => {
       el.addEventListener('click', () => {
         navigate(el.dataset.path)
-        nav.querySelectorAll('.mobile-nav-item').forEach(i => {
+        // Update active states immediately for responsiveness
+        nav.querySelectorAll('.mobile-nav-item[data-path]').forEach(i => {
           i.classList.toggle('active', i.dataset.path === el.dataset.path)
+          i.setAttribute('aria-current', i.dataset.path === el.dataset.path ? 'page' : 'false')
         })
+      })
+      // Keyboard support
+      el.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          el.click()
+        }
       })
     })
 
-    nav.querySelector('#nav-menu-btn').addEventListener('click', () => {
+    nav.querySelector('#nav-menu-btn')?.addEventListener('click', () => {
       drawerOpen ? closeDrawer() : openDrawer()
     })
   }
 
-  // ── Drawer open/close ────────────────────────────────────────
+  // ── Drawer ─────────────────────────────────────────────────
   let drawerOpen = false
 
   function openDrawer() {
     drawerOpen = true
     drawer.style.pointerEvents = 'all'
-    drawer.querySelector('#drawer-backdrop').style.background      = 'rgba(0,0,0,0.45)'
-    drawer.querySelector('#drawer-backdrop').style.backdropFilter  = 'blur(4px)'
-    drawer.querySelector('#drawer-panel').style.transform          = 'translateX(0)'
+    drawer.querySelector('#drawer-backdrop').style.background = 'rgba(0,0,0,0.5)'
+    drawer.querySelector('#drawer-panel').style.transform     = 'translateX(0)'
+    nav.querySelector('#nav-menu-btn')?.setAttribute('aria-expanded', 'true')
 
-    // Update store switcher
-    updateDrawerStoreSwitcher()
-
-    // Update active nav items
+    // Update active items
     const path = window.location.pathname
     drawer.querySelectorAll('.drawer-nav-item').forEach(el => {
       const active = el.dataset.path === path
@@ -242,21 +287,27 @@ export function initMobileNav() {
       el.style.color      = active ? 'var(--teal-500,#14B8A6)' : 'rgba(255,255,255,0.58)'
     })
 
-    // Update mode toggle
-    const isLite = document.body.classList.contains('lite-mode')
-    drawer.querySelector('#drawer-mode-pill').style.background = isLite ? 'var(--accent)' : 'rgba(255,255,255,0.15)'
-    drawer.querySelector('#drawer-mode-dot').style.transform   = isLite ? 'translateX(16px)' : 'translateX(0)'
+    // Mode toggle state
+    updateModeToggle()
+    updateDrawerStoreSwitcher()
 
-    // Haptic
     if (navigator.vibrate) navigator.vibrate(8)
   }
 
   function closeDrawer() {
     drawerOpen = false
     drawer.style.pointerEvents = 'none'
-    drawer.querySelector('#drawer-backdrop').style.background      = 'rgba(0,0,0,0)'
-    drawer.querySelector('#drawer-backdrop').style.backdropFilter  = 'blur(0px)'
-    drawer.querySelector('#drawer-panel').style.transform          = 'translateX(100%)'
+    drawer.querySelector('#drawer-backdrop').style.background = 'rgba(0,0,0,0)'
+    drawer.querySelector('#drawer-panel').style.transform     = 'translateX(100%)'
+    nav.querySelector('#nav-menu-btn')?.setAttribute('aria-expanded', 'false')
+  }
+
+  function updateModeToggle() {
+    const isLite = document.body.classList.contains('lite-mode')
+    const pill   = drawer.querySelector('#drawer-mode-pill')
+    const dot    = drawer.querySelector('#drawer-mode-dot')
+    if (pill) pill.style.background = isLite ? 'var(--accent)' : 'rgba(255,255,255,0.15)'
+    if (dot)  dot.style.transform   = isLite ? 'translateX(18px)' : 'translateX(0)'
   }
 
   function updateDrawerStoreSwitcher() {
@@ -265,27 +316,49 @@ export function initMobileNav() {
     if (!el || !stores?.length) return
 
     el.innerHTML = `
-      <select style="
-        width:100%;background:rgba(255,255,255,0.07);
-        border:1px solid rgba(255,255,255,0.1);
-        border-radius:var(--radius);padding:0.45rem 0.75rem;
-        color:rgba(255,255,255,0.75);font-size:0.875rem;
-        outline:none;cursor:pointer;
-      " id="drawer-store-select">
-        ${stores.map(s => `
-          <option value="${s.id}" ${currentStore?.id === s.id ? 'selected' : ''} style="background:#111827">
-            ${s.name}
+      <div style="display:flex;gap:8px;align-items:center">
+        <select aria-label="Select store" style="
+          flex:1;background:rgba(255,255,255,0.08);
+          border:1px solid rgba(255,255,255,0.12);
+          border-radius:10px;padding:10px 12px;
+          color:rgba(255,255,255,0.8);font-size:0.875rem;
+          outline:none;cursor:pointer;min-height:44px;
+          -webkit-appearance:none;appearance:none;
+        " id="drawer-store-select">
+          ${stores.map(s => `
+            <option value="${s.id}"
+              ${currentStore?.id === s.id ? 'selected' : ''}
+              style="background:#111827">
+              ${s.name}
+            </option>
+          `).join('')}
+          <option value="joint"
+            ${accountingView === 'joint' ? 'selected' : ''}
+            style="background:#111827">
+            Joint View
           </option>
-        `).join('')}
-        <option value="joint" ${accountingView === 'joint' ? 'selected' : ''} style="background:#111827">
-          Joint View
-        </option>
-      </select>
+        </select>
+        <button id="drawer-add-store" aria-label="Add store" style="
+          width:44px;height:44px;flex-shrink:0;
+          border-radius:10px;
+          background:rgba(255,255,255,0.08);
+          border:1px solid rgba(255,255,255,0.12);
+          display:flex;align-items:center;justify-content:center;
+          color:rgba(255,255,255,0.6);cursor:pointer;
+          transition:all 0.15s;touch-action:manipulation;
+        ">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+      </div>
     `
 
     el.querySelector('#drawer-store-select').addEventListener('change', e => {
-      const val = e.target.value
-      const { stores } = appStore.getState()
+      const val    = e.target.value
+      const stores = appStore.getState().stores
       if (val === 'joint') {
         appStore.getState().setAccountingView('joint')
         appStore.getState().setCurrentStore(null)
@@ -296,24 +369,36 @@ export function initMobileNav() {
       closeDrawer()
       navigate(window.location.pathname)
     })
+
+    el.querySelector('#drawer-add-store').addEventListener('click', () => {
+      closeDrawer()
+      setTimeout(() => {
+        import('./add-store-modal.js').then(({ openAddStoreModal }) => {
+          openAddStoreModal(newStore => {
+            appStore.getState().setCurrentStore(newStore)
+            navigate(window.location.pathname)
+          })
+        })
+      }, 350)
+    })
   }
 
-  // ── Drawer events ────────────────────────────────────────────
+  // ── Drawer events ──────────────────────────────────────────
   drawer.querySelector('#drawer-backdrop').addEventListener('click', closeDrawer)
   drawer.querySelector('#drawer-close').addEventListener('click', closeDrawer)
 
-  // Nav item clicks — navigate and auto-close
   drawer.querySelectorAll('.drawer-nav-item').forEach(el => {
     el.addEventListener('click', () => {
       navigate(el.dataset.path)
       closeDrawer()
     })
-
-    // Hover effect
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() }
+    })
     el.addEventListener('mouseenter', () => {
       if (el.dataset.path !== window.location.pathname) {
         el.style.background = 'rgba(255,255,255,0.07)'
-        el.style.color      = 'rgba(255,255,255,0.88)'
+        el.style.color      = 'rgba(255,255,255,0.9)'
       }
     })
     el.addEventListener('mouseleave', () => {
@@ -324,55 +409,33 @@ export function initMobileNav() {
     })
   })
 
-  // Mode toggle
   drawer.querySelector('#drawer-mode-toggle').addEventListener('click', () => {
     const isLite = document.body.classList.contains('lite-mode')
     document.body.classList.toggle('lite-mode', !isLite)
     localStorage.setItem('storeos-mode', !isLite ? 'lite' : 'pro')
-    drawer.querySelector('#drawer-mode-pill').style.background = !isLite ? 'var(--accent)' : 'rgba(255,255,255,0.15)'
-    drawer.querySelector('#drawer-mode-dot').style.transform   = !isLite ? 'translateX(16px)' : 'translateX(0)'
+    updateModeToggle()
     if (navigator.vibrate) navigator.vibrate([5, 30, 5])
   })
 
-  // Sign out
   drawer.querySelector('#drawer-signout').addEventListener('click', async () => {
     closeDrawer()
     await supabase.auth.signOut()
   })
 
-  // Sign out hover
-  const signoutBtn = drawer.querySelector('#drawer-signout')
-  signoutBtn.addEventListener('mouseenter', () => {
-    signoutBtn.style.background = 'rgba(239,68,68,0.12)'
-    signoutBtn.style.color      = '#FCA5A5'
-  })
-  signoutBtn.addEventListener('mouseleave', () => {
-    signoutBtn.style.background = ''
-    signoutBtn.style.color      = 'rgba(255,255,255,0.35)'
-  })
-
-  // ── FAB Camera ───────────────────────────────────────────────
-  fab.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
+  // ── FAB Camera ────────────────────────────────────────────
+  fab.addEventListener('click', () => {
     if (navigator.vibrate) navigator.vibrate(10)
 
-    fab.style.transform = 'translateX(-50%) scale(0.85)'
-    setTimeout(() => { fab.style.transform = '' }, 150)
-
-    // Must create input fresh each time on iOS
     const input   = document.createElement('input')
     input.type    = 'file'
     input.accept  = 'image/*'
     input.capture = 'environment'
-    input.style.cssText = 'position:fixed;top:-9999px;opacity:0'
+    input.style.cssText = 'position:fixed;top:-9999px;opacity:0;pointer-events:none'
     document.body.appendChild(input)
 
     input.addEventListener('change', e => {
-      if (!e.target.files?.[0]) {
-        document.body.removeChild(input)
-        return
-      }
+      document.body.removeChild(input)
+      if (!e.target.files?.[0]) return
       const file   = e.target.files[0]
       const reader = new FileReader()
       reader.onload = ev => {
@@ -381,16 +444,16 @@ export function initMobileNav() {
           sessionStorage.setItem('pending_scan_type', file.type)
           sessionStorage.setItem('pending_scan_data', ev.target.result)
         } catch(_) {}
-        document.body.removeChild(input)
         navigate('/ocr')
       }
       reader.readAsDataURL(file)
     })
 
+    // Must be synchronous click on iOS
     input.click()
   })
 
-  // ── Route change listener ────────────────────────────────────
+  // ── Route listener ────────────────────────────────────────
   window.addEventListener('popstate', () => {
     updateVisibility()
     renderNav()
@@ -404,14 +467,9 @@ export function initMobileNav() {
     document.body.classList.add('lite-mode')
   }
 
-  // ── Init ─────────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────
   renderNav()
   updateVisibility()
-
-  // Also re-check after any dynamic navigation
-  document.addEventListener('click', () => {
-    setTimeout(updateVisibility, 50)
-  })
 
   return { renderNav, updateVisibility }
 }
