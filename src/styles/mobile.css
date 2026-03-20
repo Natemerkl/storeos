@@ -1,0 +1,462 @@
+/* ═══════════════════════════════════════════════════════════
+   STOREOS MOBILE OVERRIDES
+   Fixes all horizontal scroll, cropping, and layout issues
+   on screens ≤768px. Import this AFTER main.css.
+
+   Strategy:
+   - Tables → card-style stacked rows
+   - Multi-col grids → single column
+   - Fixed widths → 100%
+   - Overflow hidden → visible with proper wrapping
+   - All content visible without horizontal scroll
+═══════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* ── Base resets ──────────────────────────────────────── */
+  html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
+  #app {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
+  .main-content {
+    margin-left: 0 !important;
+    padding: 1rem !important;
+    padding-bottom: calc(var(--mobile-nav-total, 90px) + 2rem) !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  /* ── Page header — stack on mobile ───────────────────── */
+  .page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+    margin-bottom: 1rem !important;
+  }
+
+  .page-header > div:last-child {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* ── KPI grid — 2 columns max ─────────────────────────── */
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.625rem !important;
+  }
+
+  .kpi-value {
+    font-size: 1.25rem !important;
+    letter-spacing: -0.3px !important;
+  }
+
+  /* ── Cards — full width, no overflow ──────────────────── */
+  .card {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden;
+    border-radius: 16px !important;
+    padding: 1rem !important;
+  }
+
+  /* ── TABLE → CARD CONVERSION ──────────────────────────── */
+  /*
+    This converts ALL tables to stacked card rows on mobile.
+    Each <tr> becomes a card. Each <td> shows its column
+    header as a label using data-label attributes.
+    No horizontal scroll. All data visible.
+  */
+
+  .table-wrap {
+    overflow-x: visible !important;
+    overflow: visible !important;
+  }
+
+  table {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  table thead {
+    display: none !important; /* Hide header row — labels come from data-label */
+  }
+
+  table tbody {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.625rem !important;
+    width: 100% !important;
+  }
+
+  table tr {
+    display: flex !important;
+    flex-direction: column !important;
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    padding: 0.875rem !important;
+    gap: 0.375rem !important;
+    box-shadow: var(--shadow-xs) !important;
+  }
+
+  table tr:hover td {
+    background: transparent !important;
+  }
+
+  table td {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: 0.25rem 0 !important;
+    border-bottom: none !important;
+    font-size: 0.875rem !important;
+    gap: 0.5rem !important;
+    flex-wrap: wrap !important;
+  }
+
+  /* Show column label before value */
+  table td::before {
+    content: attr(data-label);
+    font-size: 0.6875rem !important;
+    font-weight: 700 !important;
+    color: var(--muted) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* td with no data-label — full width */
+  table td:not([data-label]) {
+    justify-content: flex-start !important;
+  }
+
+  /* Remove the nth-child hide rule from main.css */
+  table th:nth-child(n+5),
+  table td:nth-child(n+5) {
+    display: flex !important;
+  }
+
+  /* ── Buttons — full width where needed ────────────────── */
+  .btn {
+    min-height: 44px !important;
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+
+  /* Action buttons in tables — full width */
+  table td .btn {
+    min-height: 36px !important;
+    font-size: 0.8125rem !important;
+  }
+
+  /* ── Forms — full width, no zoom ──────────────────────── */
+  .form-input,
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  input[type="date"],
+  select,
+  textarea {
+    font-size: 16px !important; /* Prevents iOS zoom */
+    min-height: 44px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* ── Grid layouts → single column ─────────────────────── */
+  [style*="grid-template-columns"],
+  .grid-2,
+  .grid-3,
+  .grid-4 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* 2-col forms — keep 2 cols on mobile if items are small */
+  .form-grid-2 {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* ── Dashboard specific ────────────────────────────────── */
+  /* Cash positions + Low stock side by side → stack */
+  #app .main-content > div > div[style*="grid-template-columns:1fr 1fr"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+  }
+
+  /* ── Tab bars — scrollable ─────────────────────────────── */
+  .tab-bar,
+  div[style*="border-bottom:2px solid var(--border)"] {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .tab-bar::-webkit-scrollbar { display: none !important; }
+
+  .tab-btn {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    min-height: 44px !important;
+    padding: 0 1rem !important;
+  }
+
+  /* ── Modal — bottom sheet ──────────────────────────────── */
+  .modal-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .modal {
+    border-radius: 24px 24px 0 0 !important;
+    border-bottom: none !important;
+    max-width: 100% !important;
+    max-height: 92dvh !important;
+    overflow-y: auto !important;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem) !important;
+    width: 100% !important;
+  }
+
+  /* ── Settings page ─────────────────────────────────────── */
+  /* Settings 2-col layout → stack */
+  div[style*="grid-template-columns:200px 1fr"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+  }
+
+  /* Settings nav → horizontal scrollable row */
+  .card[style*="padding:0.5rem"] {
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    gap: 0.25rem !important;
+    padding: 0.5rem !important;
+    margin-bottom: 1rem !important;
+    border-radius: 12px !important;
+  }
+
+  .settings-nav-item {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    min-height: 40px !important;
+    padding: 0.4rem 0.875rem !important;
+  }
+
+  /* Setting rows — stack label and control */
+  .setting-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+
+  .setting-row > div:last-child,
+  .setting-row > select,
+  .setting-row > input {
+    width: 100% !important;
+  }
+
+  /* ── Credits page ──────────────────────────────────────── */
+  /* 3-col KPI → 2-col */
+  div[style*="grid-template-columns:repeat(3,1fr)"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Credit box in modal */
+  .credit-box div[style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* ── Accounting page ───────────────────────────────────── */
+  /* P&L 2-col → stack */
+  div[style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* ── Filter bars — wrap ────────────────────────────────── */
+  .card div[style*="display:flex"][style*="gap:0.75rem"] {
+    flex-wrap: wrap !important;
+  }
+
+  .card .form-input[style*="max-width"] {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* ── Search inputs in filter bars ─────────────────────── */
+  input[placeholder*="Search"],
+  input[placeholder*="search"] {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* ── Overflow hidden containers ────────────────────────── */
+  /* Prevent any container from causing horizontal scroll */
+  .card,
+  .kpi-card,
+  .modal,
+  .pos-right,
+  section,
+  article {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* ── Date inputs — full width ──────────────────────────── */
+  input[type="date"] {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* ── Select dropdowns — full width ────────────────────── */
+  select {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* ── Inline action buttons — stack ────────────────────── */
+  div[style*="display:flex;gap:0.4rem"] {
+    flex-wrap: wrap !important;
+  }
+
+  /* ── OCR modal — full bottom sheet ────────────────────── */
+  .modal-overlay > div[style*="max-width:640px"] {
+    border-radius: 24px 24px 0 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    max-height: 92dvh !important;
+    overflow-y: auto !important;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem) !important;
+  }
+
+  /* OCR line items grid → stack */
+  .modal-overlay div[style*="grid-template-columns:1fr 1fr 1fr"] {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* ── Inventory page ────────────────────────────────────── */
+  /* Stock movement badges — wrap */
+  div[style*="display:flex;gap:0.5rem;flex-wrap:wrap"] {
+    flex-wrap: wrap !important;
+    width: 100% !important;
+  }
+
+  /* ── Reports page charts ───────────────────────────────── */
+  canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* ── Transfer page ─────────────────────────────────────── */
+  div[style*="max-width:520px"] {
+    max-width: 100% !important;
+  }
+
+  /* ── Onboarding ────────────────────────────────────────── */
+  /* Account input grids → stack */
+  div[style*="grid-template-columns:1fr 160px auto"] {
+    grid-template-columns: 1fr 1fr !important;
+    grid-template-rows: auto auto !important;
+  }
+
+  /* Inventory rows → stack */
+  div[style*="grid-template-columns:1fr 100px 110px auto"] {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+  }
+
+  /* ── Auth page ─────────────────────────────────────────── */
+  div[style*="max-width:400px"] {
+    max-width: 100% !important;
+    padding: 0 0.5rem !important;
+  }
+
+  /* ── POS layout on mobile ──────────────────────────────── */
+  .pos-layout {
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    max-height: none !important;
+    gap: 0 !important;
+  }
+
+  .pos-left {
+    overflow: visible !important;
+    min-height: 0 !important;
+    padding-bottom: 100px !important;
+  }
+
+  .pos-products {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  .pos-products.grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* ── Sidebar bottom stats — hide on mobile (already hidden) */
+  .sidebar-bottom { display: none; }
+
+  /* ── Typography scaling ────────────────────────────────── */
+  .page-title {
+    font-size: 1.375rem !important;
+  }
+
+  /* Large numbers in stat cards */
+  .kpi-value {
+    font-size: 1.25rem !important;
+  }
+
+  /* ── Prevent text overflow ─────────────────────────────── */
+  td, th {
+    word-break: break-word !important;
+  }
+
+  /* ── Scroll anchoring ──────────────────────────────────── */
+  .pos-cart-items {
+    overflow-scroll: touch !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+}
+
+/* Extra small screens (iPhone SE etc) */
+@media (max-width: 375px) {
+  .main-content {
+    padding: 0.75rem !important;
+    padding-bottom: calc(var(--mobile-nav-total, 90px) + 2rem) !important;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  .kpi-value {
+    font-size: 1.125rem !important;
+  }
+
+  .pos-products.grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  table tr {
+    padding: 0.75rem !important;
+  }
+}

@@ -1,3 +1,5 @@
+import './styles/mobile.css'
+import { initTableEnhancer } from './utils/mobile-tables.js'
 // ── Global error handlers ──────────────────────────────────
 window.addEventListener('error', (e) => {
   console.error('Global error:', e.message)
@@ -184,6 +186,7 @@ function handleChunkError(pageName) {
 }
 
 // ── Build layout ───────────────────────────────────────────
+
 export function buildLayout() {
   const navExists     = document.querySelector('.sidebar')
   const contentExists = document.querySelector('.main-content')
@@ -206,6 +209,12 @@ export function buildLayout() {
 
   if (!document.getElementById('mobile-nav')) {
     initMobileNav()
+  }
+
+  // Auto-enhance tables for mobile card view — ADD THESE TWO LINES
+  if (!window._tableEnhancerInited) {
+    window._tableEnhancerInited = true
+    initTableEnhancer()
   }
 }
 
