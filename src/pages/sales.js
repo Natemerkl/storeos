@@ -363,7 +363,12 @@ export async function render(container) {
               </div>
               <div class="product-name">${highlight(item.item_name, searchQuery)}</div>
               <div class="product-cat">${item.category || ''}</div>
-              <div class="product-price">${fmt(item.selling_price)} ETB</div>
+              <div class="product-price">
+  ${Number(item.selling_price || item.unit_cost || 0) > 0
+    ? fmt(item.selling_price || item.unit_cost) + ' ETB'
+    : 'No price set'
+  }
+</div>
               ${outOfStock
                 ? `<div class="product-stock out">Out of stock</div>`
                 : `<div class="product-stock ok">${item.quantity} in stock</div>`
@@ -401,7 +406,12 @@ export async function render(container) {
                     </span>
                   </div>
                 </div>
-                <div class="product-row-price">${fmt(item.selling_price)} ETB</div>
+                <div class="product-row-price">
+  ${Number(item.selling_price || item.unit_cost || 0) > 0
+    ? fmt(item.selling_price || item.unit_cost) + ' ETB'
+    : '—'
+  }
+</div>
                 <button class="product-row-add ${inCart ? 'added' : ''}" data-id="${item.id}">
                   ${inCart ? renderIcon('check', 14, 'var(--accent)') : renderIcon('plus', 14, '#fff')}
                 </button>
@@ -433,21 +443,30 @@ export async function render(container) {
   }
 
   // ── Cart operations ──────────────────────────────────────
-  function addToCart(item) {
-    const existing = cart.find(c => c.item.id === item.id)
-    if (existing) {
-      existing.qty++
-    } else {
-      cart.push({
-        item,
-        qty:   1,
-        price: Number(item.selling_price) || 0,
-        note:  '',
-      })
-    }
-    renderCart()
-    renderProducts()
+ function addToCart(item) {
+  const existing = cart.find(c => c.item.id === item.id)
+
+  // Price priority: selling_price → unit_cost → 0
+  const unitPrice = Number(item.selling_price) > 0
+    ? Number(item.selling_price)
+    : Number(item.unit_cost) > 0
+      ? Number(item.unit_cost)
+      : 0
+
+  if (existing) {
+    existing.qty++
+    existing.confirmedTotal = existing.qty * existing.price
+  } else {
+    cart.push({
+      item,
+      qty:   1,
+      price: unitPrice,
+      note:  '',
+    })
   }
+  renderCart()
+  renderProducts()
+}
 
   function removeFromCart(itemId) {
     cart = cart.filter(c => c.item.id !== itemId)
@@ -550,10 +569,8 @@ export async function render(container) {
 
             <!-- Line total -->
             <div class="cart-line-total">
-              ${fmt(subtotal)} ETB
-            </div>
-          </div>
-
+  ${fmt(entry.qty * entry.price)} ETB
+</div>
           ${isLoss ? `
             <div class="loss-warning">
               ${renderIcon('alert', 12)} Selling below cost (cost: ${fmt(cost)} ETB)
@@ -572,69 +589,68 @@ export async function render(container) {
     })
 
     container.querySelectorAll('[data-qty-change]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const entry = cart.find(c => c.item.id === btn.dataset.qtyChange)
-        if (!entry) return
-        const newQty = Math.max(0.01, entry.qty + Number(btn.dataset.delta))
-        entry.qty = Math.round(newQty * 100) / 100
-        renderCart()
-        renderProducts()
-      })
-    })
+  btn.addEventListener('click', () => {
+    const entry = cart.find(c => c.item.id === btn.dataset.qtyChange)
+    if (!entry) return
+    const delta  = Number(btn.dataset.delta)
+    entry.qty    = Math.max(0.01, Math.round((entry.qty + delta) * 100) / 100)
+    renderCart()
+    renderProducts()
+  })
+})
 
-    container.querySelectorAll('[data-qty-input]').forEach(input => {
-      input.addEventListener('change', () => {
-        const val = parseFloat(input.value) || 1
-        updateCartItem(input.dataset.qtyInput, 'qty', Math.max(0.01, val))
-        renderCart()
-      })
-    })
+container.querySelectorAll('[data-qty-input]').forEach(input => {
+  input.addEventListener('change', () => {
+    const entry = cart.find(c => c.item.id === input.dataset.qtyInput)
+    if (!entry) return
+    entry.qty = Math.max(0.01, parseFloat(input.value) || 1)
+    renderCart()
+  })
+})
 
-    container.querySelectorAll('[data-price-input]').forEach(input => {
-      input.addEventListener('input', () => {
-        updateCartItem(input.dataset.priceInput, 'price', parseFloat(input.value) || 0)
-        // Live update line total and profit warning
-        renderCart()
-      })
-    })
-
+container.querySelectorAll('[data-price-input]').forEach(input => {
+  input.addEventListener('input', () => {
+    const entry = cart.find(c => c.item.id === input.dataset.priceInput)
+    if (!entry) return
+    entry.price = parseFloat(input.value) || 0
+    // Update line total display immediately
+    const lineTotal = input.closest('.cart-item')?.querySelector('.cart-line-total')
+    if (lineTotal) lineTotal.textContent = fmt(entry.qty * entry.price) + ' ETB'
     updateTotals()
-  }
+  })
+})
 
   function updateTotals() {
-    const subtotal = cart.reduce((s, e) => s + e.qty * e.price, 0)
-    const discAmt  = subtotal * (discount / 100)
-    const total    = subtotal - discAmt
-    const totalCost= cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost) || 0), 0)
-    const profit   = total - totalCost
-    const margin   = total > 0 ? (profit / total * 100) : 0
+  const subtotal  = cart.reduce((s, e) => s + (e.qty * e.price), 0)
+  const discAmt   = subtotal * (discount / 100)
+  const total     = subtotal - discAmt
+  const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost) || 0), 0)
+  const profit    = total - totalCost
+  const margin    = total > 0 ? (profit / total * 100) : 0
 
-    const set = (id, val) => { const el = container.querySelector(id); if (el) el.textContent = val }
-    set('#tot-subtotal', fmt(subtotal) + ' ETB')
-    set('#tot-discount', '-' + fmt(discAmt) + ' ETB')
-    set('#tot-final',    fmt(total) + ' ETB')
+  const set = (id, val) => {
+    const el = container.querySelector(id)
+    if (el) el.textContent = val
+  }
 
-    // Profit bar
-    const profitBar = container.querySelector('#profit-bar')
-    if (profitBar) {
-      if (profit < 0) {
-        profitBar.className = 'profit-bar loss'
-        profitBar.innerHTML = `
-          ${renderIcon('alert', 13)} Net loss of ${fmt(Math.abs(profit))} ETB on this sale
-        `
-      } else if (margin < 10) {
-        profitBar.className = 'profit-bar low'
-        profitBar.innerHTML = `
-          ${renderIcon('alert', 13)} Low margin — ${margin.toFixed(1)}% profit
-        `
-      } else {
-        profitBar.className = 'profit-bar ok'
-        profitBar.innerHTML = `
-          ${renderIcon('check', 13)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB profit
-        `
-      }
+  set('#tot-subtotal', fmt(subtotal) + ' ETB')
+  set('#tot-discount', '-' + fmt(discAmt) + ' ETB')
+  set('#tot-final',    fmt(total) + ' ETB')
+
+  const profitBar = container.querySelector('#profit-bar')
+  if (profitBar) {
+    if (profit < 0) {
+      profitBar.className = 'profit-bar loss'
+      profitBar.innerHTML = `${renderIcon('alert', 13)} Net loss of ${fmt(Math.abs(profit))} ETB on this sale`
+    } else if (margin < 10) {
+      profitBar.className = 'profit-bar low'
+      profitBar.innerHTML = `${renderIcon('alert', 13)} Low margin — ${margin.toFixed(1)}% profit`
+    } else {
+      profitBar.className = 'profit-bar ok'
+      profitBar.innerHTML = `${renderIcon('check', 13)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB profit`
     }
   }
+}
 
   // ── Search ────────────────────────────────────────────────
   const searchInput = container.querySelector('#pos-search')
@@ -1629,4 +1645,4 @@ function injectPOSStyles() {
     }
   `
   document.head.appendChild(style)
-}
+}}
