@@ -1,28 +1,9 @@
-// ── Global error handlers ──────────────────────────────────
-window.addEventListener('error', (e) => {
-  console.error('Global error:', e.message)
-  setTimeout(() => {
-    const app = document.getElementById('app')
-    if (app && app.children.length === 0) {
-      const reloaded = sessionStorage.getItem('error-reload')
-      if (!reloaded) {
-        sessionStorage.setItem('error-reload', '1')
-        window.location.reload()
-      }
-    }
-  }, 2000)
-})
-
+// ── Suppress Supabase lock noise ──────────────────────────
 window.addEventListener('unhandledrejection', (e) => {
-  if (
-    e.reason?.message?.includes('Lock broken') ||
-    e.reason?.message?.includes('lock') ||
-    e.reason?.message?.includes('Failed to fetch')
-  ) {
+  const msg = e.reason?.message || ''
+  if (msg.includes('Lock broken') || msg.includes('lock')) {
     e.preventDefault()
-    return
   }
-  console.error('Unhandled rejection:', e.reason)
 })
 
 import './styles/main.css'
@@ -35,15 +16,14 @@ import { initMobileNav } from './components/mobile-nav.js'
 import { initTableEnhancer } from './utils/mobile-tables.js'
 
 const app = document.getElementById('app')
-let navEl        = null
-let contentEl    = null
-let layoutBuilt  = false
-let routerInited = false
+let navEl         = null
+let contentEl     = null
+let isInitialized = false  // prevents double-init from onAuthStateChange
 
 // ── Loading screen ─────────────────────────────────────────
 function showLoadingScreen() {
   app.innerHTML = `
-    <div id="app-loader" style="
+    <div style="
       position:fixed;inset:0;
       display:flex;align-items:center;justify-content:center;
       flex-direction:column;gap:1rem;
@@ -54,7 +34,7 @@ function showLoadingScreen() {
         width:48px;height:48px;background:#0D9488;border-radius:14px;
         display:flex;align-items:center;justify-content:center;
         box-shadow:0 8px 24px rgba(13,148,136,0.3);
-        animation:logo-pulse 1.8s ease-in-out infinite;
+        animation:lp 1.8s ease-in-out infinite;
       ">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
           stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -64,12 +44,12 @@ function showLoadingScreen() {
           <path d="M2 7h20"/>
         </svg>
       </div>
-      <div style="font-size:1.25rem;font-weight:700;color:#111827;letter-spacing:-0.3px;">
+      <div style="font-size:1.25rem;font-weight:700;color:#111827;letter-spacing:-0.3px">
         Store<span style="color:#0D9488">OS</span>
       </div>
-      <div style="font-size:0.8125rem;color:#6B7280">Loading...</div>
+      <div style="font-size:0.8125rem;color:#9CA3AF">Loading...</div>
       <style>
-        @keyframes logo-pulse {
+        @keyframes lp {
           0%,100%{transform:scale(1);box-shadow:0 8px 24px rgba(13,148,136,0.3);}
           50%{transform:scale(1.06);box-shadow:0 12px 32px rgba(13,148,136,0.45);}
         }
@@ -78,107 +58,38 @@ function showLoadingScreen() {
   `
 }
 
-// ── Mobile nav visibility ──────────────────────────────────
+// ── Mobile nav ─────────────────────────────────────────────
 function hideMobileNav() {
-  const mobileNav = document.getElementById('mobile-nav')
-  const fabCamera = document.getElementById('fab-camera')
-  if (mobileNav) mobileNav.style.display = 'none'
-  if (fabCamera) fabCamera.style.display = 'none'
+  document.getElementById('mobile-nav')?.style.setProperty('display', 'none')
+  document.getElementById('fab-camera')?.style.setProperty('display', 'none')
 }
 
 function showMobileNav() {
   if (window.innerWidth > 768) return
-  const mobileNav = document.getElementById('mobile-nav')
-  const fabCamera = document.getElementById('fab-camera')
-  if (mobileNav) mobileNav.style.display = 'block'
-  if (fabCamera) fabCamera.style.display = 'flex'
+  const nav = document.getElementById('mobile-nav')
+  const fab = document.getElementById('fab-camera')
+  if (nav) nav.style.display = 'block'
+  if (fab) fab.style.display = 'flex'
 }
 
-// ── Load page ──────────────────────────────────────────────
-export async function loadPage(pageName) {
-  const fullScreenPages = ['auth', 'onboarding']
-
-  if (fullScreenPages.includes(pageName)) {
-    app.innerHTML = ''
-    layoutBuilt   = false
-    navEl         = null
-    contentEl     = document.createElement('div')
-    contentEl.style.width = '100%'
-    app.appendChild(contentEl)
-    hideMobileNav()
-    try {
-      const module = await import(`./pages/${pageName}.js`)
-      module.render(contentEl)
-    } catch(err) {
-      console.error(`Failed to load page: ${pageName}`, err)
-      handleChunkError(pageName)
-    }
-    return
-  }
-
-  if (!document.querySelector('.sidebar')) buildLayout()
-  showMobileNav()
-
-  if (contentEl && document.body.contains(contentEl)) {
-    contentEl.innerHTML = ''
-  } else {
-    buildLayout()
-  }
-
-  try {
-    const module = await import(`./pages/${pageName}.js`)
-    if (contentEl && document.body.contains(contentEl)) {
-      module.render(contentEl)
-    }
-  } catch(err) {
-    console.error(`Failed to load page: ${pageName}`, err)
-    handleChunkError(pageName)
-    return
-  }
-
-  if (navEl && document.body.contains(navEl)) {
-    navEl.querySelectorAll('.nav-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.path === window.location.pathname)
-    })
-  }
+// ── Build full-screen layout (auth/onboarding) ─────────────
+function buildFullScreen() {
+  app.innerHTML = ''
+  navEl   = null
+  contentEl = document.createElement('div')
+  contentEl.style.cssText = 'width:100%;min-height:100vh'
+  app.appendChild(contentEl)
+  hideMobileNav()
 }
 
-// ── Handle chunk load failure ──────────────────────────────
-function handleChunkError(pageName) {
-  const key = `chunk-retry-${pageName}`
-  if (!sessionStorage.getItem(key)) {
-    sessionStorage.setItem(key, '1')
-    window.location.reload()
-  } else {
-    sessionStorage.removeItem(key)
-    if (contentEl && document.body.contains(contentEl)) {
-      contentEl.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;
-          justify-content:center;min-height:60vh;gap:1rem;
-          color:#6B7280;text-align:center;padding:2rem;">
-          <div style="font-size:2rem">⚠️</div>
-          <div style="font-weight:600;color:#111827">Page failed to load</div>
-          <div style="font-size:0.875rem">Check your connection and try again</div>
-          <button onclick="window.location.reload()" style="
-            padding:0.5rem 1.25rem;border-radius:8px;background:#0D9488;
-            color:#fff;border:none;font-size:0.875rem;font-weight:600;
-            cursor:pointer;margin-top:0.5rem;">Reload App</button>
-        </div>`
-    }
-  }
-}
-
-// ── Build layout ───────────────────────────────────────────
+// ── Build app layout (authenticated pages) ─────────────────
 export function buildLayout() {
-  const navExists     = document.querySelector('.sidebar')
-  const contentExists = document.querySelector('.main-content')
-
-  if (navExists && contentExists) {
+  // Already built — just re-render nav
+  if (document.querySelector('.sidebar') && document.querySelector('.main-content')) {
     if (navEl) renderNav(navEl)
     return
   }
 
-  layoutBuilt   = true
   app.innerHTML = ''
 
   navEl = document.createElement('aside')
@@ -193,23 +104,70 @@ export function buildLayout() {
     initMobileNav()
   }
 
-  if (!window._tableEnhancerInited) {
-    window._tableEnhancerInited = true
+  if (!window._tblEnhanced) {
+    window._tblEnhanced = true
     initTableEnhancer()
   }
 }
 
-export function buildFullScreen() {
-  layoutBuilt   = false
-  app.innerHTML = ''
-  navEl         = null
-  contentEl     = document.createElement('div')
-  contentEl.style.width = '100%'
-  app.appendChild(contentEl)
+// ── Load a page ────────────────────────────────────────────
+export async function loadPage(pageName) {
+  const isFullScreen = ['auth', 'onboarding'].includes(pageName)
+
+  if (isFullScreen) {
+    buildFullScreen()
+  } else {
+    if (!document.querySelector('.sidebar')) buildLayout()
+    showMobileNav()
+    if (contentEl && document.body.contains(contentEl)) {
+      contentEl.innerHTML = ''
+    } else {
+      buildLayout()
+    }
+  }
+
+  try {
+    const mod = await import(`./pages/${pageName}.js`)
+    // Verify container still valid before rendering
+    if (contentEl && document.body.contains(contentEl)) {
+      mod.render(contentEl)
+    }
+  } catch(err) {
+    console.error('loadPage error:', pageName, err)
+    // Retry once on chunk error
+    const key = `retry-${pageName}`
+    if (!sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, '1')
+      window.location.reload()
+    } else {
+      sessionStorage.removeItem(key)
+      if (contentEl && document.body.contains(contentEl)) {
+        contentEl.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;
+            justify-content:center;min-height:60vh;gap:1rem;padding:2rem;text-align:center">
+            <div style="font-size:1.5rem">⚠️</div>
+            <div style="font-weight:600;font-size:1rem">Failed to load page</div>
+            <button onclick="location.reload()" style="
+              padding:0.5rem 1.25rem;border-radius:8px;background:#0D9488;
+              color:#fff;border:none;font-weight:600;cursor:pointer">
+              Reload
+            </button>
+          </div>`
+      }
+    }
+    return
+  }
+
+  // Update sidebar active state
+  if (navEl && document.body.contains(navEl)) {
+    navEl.querySelectorAll('.nav-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.path === window.location.pathname)
+    })
+  }
 }
 
-// ── Load user data ─────────────────────────────────────────
-async function loadUserData(user) {
+// ── Go to authenticated app ────────────────────────────────
+async function goToApp(user) {
   try {
     const { data: owner } = await supabase
       .from('owners')
@@ -219,7 +177,7 @@ async function loadUserData(user) {
 
     if (!owner) {
       buildFullScreen()
-      if (!routerInited) { initRouter(); routerInited = true }
+      initRouter()
       navigate('/onboarding')
       return
     }
@@ -229,36 +187,43 @@ async function loadUserData(user) {
       .select('*')
       .eq('owner_id', owner.id)
 
-    if (!stores || stores.length === 0) {
+    if (!stores?.length) {
       buildFullScreen()
-      if (!routerInited) { initRouter(); routerInited = true }
+      initRouter()
       navigate('/onboarding')
       return
     }
 
     appStore.getState().setStores(stores)
     appStore.getState().setCurrentStore(stores[0])
-    buildLayout()
 
-    if (
-      window.location.pathname === '/auth' ||
-      window.location.pathname === '/'
-    ) {
+    buildLayout()
+    showMobileNav()
+
+    // Fix URL if stuck on /auth or /
+    const path = window.location.pathname
+    if (path === '/auth' || path === '/') {
       window.history.replaceState({}, '', '/dashboard')
     }
 
-    if (!routerInited) { initRouter(); routerInited = true }
-    showMobileNav()
+    initRouter()
 
   } catch(err) {
-    console.error('loadUserData error:', err)
+    console.error('goToApp error:', err)
     buildFullScreen()
-    if (!routerInited) { initRouter(); routerInited = true }
+    initRouter()
     navigate('/auth')
   }
 }
 
-// ── App init ───────────────────────────────────────────────
+// ── Go to auth page ────────────────────────────────────────
+function goToAuth() {
+  buildFullScreen()
+  initRouter()
+  navigate('/auth')
+}
+
+// ── Main init — runs once on page load ─────────────────────
 async function init() {
   if (localStorage.getItem('storeos-mode') === 'lite') {
     document.body.classList.add('lite-mode')
@@ -266,53 +231,52 @@ async function init() {
 
   showLoadingScreen()
 
-  // Hard 3-second timeout — if auth hangs, go to auth page
-  const sessionTimeout = new Promise((resolve) => {
-    setTimeout(() => resolve({ data: { session: null }, timedOut: true }), 3000)
-  })
-
+  // Race session check against 3s timeout
   let session = null
   try {
-    const result = await Promise.race([
-      supabase.auth.getSession(),
-      sessionTimeout
+    const timeout = new Promise(r => setTimeout(() => r(null), 3000))
+    const result  = await Promise.race([
+      supabase.auth.getSession().then(r => r.data?.session),
+      timeout
     ])
-    session = result?.data?.session || null
+    session = result || null
   } catch(e) {
-    console.warn('Auth session error:', e.message)
+    console.warn('Session check failed:', e.message)
     session = null
   }
 
+  isInitialized = true
+
   if (!session) {
-    buildFullScreen()
-    if (!routerInited) { initRouter(); routerInited = true }
-    navigate('/auth')
+    goToAuth()
     return
   }
 
   appStore.getState().setUser(session.user)
-  await loadUserData(session.user)
+  await goToApp(session.user)
 }
 
-// ── Auth state change ──────────────────────────────────────
+// ── Auth state listener ─────────────────────────────────────
+// Only handles changes AFTER init completes
 supabase.auth.onAuthStateChange(async (event, session) => {
+  // Ignore events during initial load — init() handles that
+  if (!isInitialized) return
+
   if (event === 'SIGNED_IN' && session) {
-    const currentUser = appStore.getState().user
-    if (!currentUser || currentUser.id !== session.user.id) {
+    const current = appStore.getState().user
+    // Only re-route if different user
+    if (!current || current.id !== session.user.id) {
       appStore.getState().setUser(session.user)
-      await loadUserData(session.user)
+      await goToApp(session.user)
     }
   }
+
   if (event === 'SIGNED_OUT') {
     appStore.getState().setUser(null)
     appStore.getState().setStores([])
     appStore.getState().setCurrentStore(null)
-    routerInited = false
     hideMobileNav()
-    buildFullScreen()
-    initRouter()
-    routerInited = true
-    navigate('/auth')
+    goToAuth()
   }
 })
 
