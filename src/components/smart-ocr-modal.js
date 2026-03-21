@@ -1,593 +1,487 @@
 import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
-import { fuzzyMatch, extractMetaFromText, parseProductLine } from '../utils/fuzzy.js'
-import { learnFromSession, getPreferredPayment, getLearnedColumns } from '../utils/patterns.js'
 import { navigate } from '../router.js'
+import { renderIcon } from './icons.js'
+import { fuzzyMatch } from '../utils/fuzzy.js'
+import { audit } from '../utils/audit.js'
 
-export async function openSmartOCRModal(log, onComplete) {
+let modalEl = null
+
+export async function openSmartOCRModal(logId) {
+  if (modalEl) modalEl.remove()
+
   const { currentStore } = appStore.getState()
 
+  const { data: log, error } = await supabase
+    .from('ocr_logs').select('*').eq('id', logId).single()
+
+  if (error || !log) { alert('Could not load scan data'); return }
+
   const [
-    { data: inventory },
     { data: accounts },
+    { data: inventoryItems },
     { data: customers },
-    preferredPayment,
-    learnedSale,
-    learnedInventory,
   ] = await Promise.all([
-    supabase.from('inventory_items').select('id, item_name, selling_price, unit_cost, quantity').eq('store_id', currentStore?.id),
-    supabase.from('cash_accounts').select('id, name, account_type').eq('store_id', currentStore?.id),
-    supabase.from('customers').select('id, name, phone, credit_balance').eq('store_id', currentStore?.id),
-    getPreferredPayment(),
-    getLearnedColumns('sale'),
-    getLearnedColumns('inventory'),
+    supabase.from('cash_accounts').select('id, name').eq('store_id', currentStore?.id),
+    supabase.from('inventory_items').select('id, item_name, selling_price, unit_cost').eq('store_id', currentStore?.id),
+    supabase.from('customers').select('id, name, phone').eq('store_id', currentStore?.id),
   ])
 
-  // Parse OCR into line items — preserve quantities from OCR
-  const extracted  = extractMetaFromText(log.raw_text || '')
-  const rawLines   = (log.raw_text || '').split('\n').map(l => l.trim()).filter(Boolean)
+  // ── Parse line items from OCR data ─────────────────────
+  const rawItems = log.parsed_data?.line_items || []
 
-  const parsedItems = log.parsed_data?.line_items?.length
-    ? log.parsed_data.line_items.map(i => {
-        const parsed = parseProductLine(`${i.description} ${i.quantity || ''} ${i.unit_price || ''}`)
-        return {
-          confirmedName:  i.description || parsed?.name || '',
-          // ✅ FIX: preserve OCR quantity, never default to 1 if OCR gave us a number
-          confirmedQty:   Number(i.quantity)  || Number(parsed?.quantity)  || 1,
-          confirmedPrice: Number(i.unit_price) || Number(parsed?.unitPrice) || null,
-          confirmedTotal: i.unit_price && i.quantity
-            ? Number(i.quantity) * Number(i.unit_price)
-            : Number(parsed?.total) || null,
-          matched: null,
-          raw: i.description,
-        }
-      })
-    : rawLines.slice(1, 10)
-        .map(l => parseProductLine(l))
-        .filter(p => p?.name?.length > 1)
-        .map(p => ({
-          confirmedName:  p.name,
-          confirmedQty:   p.quantity  || 1,
-          confirmedPrice: p.unitPrice || null,
-          confirmedTotal: p.total     || null,
-          matched: null,
-          raw: p.raw,
-        }))
+  let items = rawItems.map(i => {
+    const qty = Number(i.quantity) || 1
 
-  // State
-  let destination     = 'sale'
-  let paymentMethod   = preferredPayment || 'cash'
-  let isCredit        = paymentMethod === 'credit'
-  let lineItems       = parsedItems.length > 0
-    ? parsedItems
-    : [{ confirmedName:'', confirmedQty:1, confirmedPrice:null, confirmedTotal:null, matched:null }]
+    // Price priority: unit_price → back-calculate from total
+    let unitPrice = null
+    if (Number(i.unit_price) > 0) {
+      unitPrice = Number(i.unit_price)
+    } else if (Number(i.total) > 0) {
+      unitPrice = Number(i.total) / qty
+    }
 
-  // Extra learned fields
-  const extraFields = {}
-  if (learnedSale?.columns?.includes('vehicle_plate')) extraFields.vehicle_plate = ''
-  if (learnedSale?.columns?.includes('customer_note')) extraFields.customer_note = ''
+    const matched = inventoryItems?.length
+      ? fuzzyMatch(i.description, inventoryItems, { key: 'item_name', threshold: 0.6, limit: 1 })[0]
+      : null
 
+    return {
+      name:    i.description || '',
+      qty:     qty,
+      price:   unitPrice,
+      total:   unitPrice != null ? qty * unitPrice : null,
+      matched: matched || null,
+    }
+  })
+
+  if (!items.length) {
+    items.push({ name: '', qty: 1, price: null, total: null, matched: null })
+  }
+
+  let mode      = 'sale'
+  let payMethod = 'cash'
+  let accountId = accounts?.[0]?.id || ''
+  let docDate   = log.parsed_data?.date || new Date().toISOString().split('T')[0]
+
+  // ── Modal shell ─────────────────────────────────────────
   const overlay = document.createElement('div')
-  overlay.className = 'modal-overlay'
-  overlay.style.cssText = 'display:flex;align-items:flex-start;overflow-y:auto;padding:1rem'
+  overlay.className  = 'modal-overlay'
+  overlay.style.zIndex = '300'
 
-  function buildHTML() {
-    // Only show auto-detected section if we have meaningful distinct data
-    const detectedItems = []
-    // ✅ FIX: only show customer name if it's actually an Ethiopian name pattern
-    if (extracted.customerName) detectedItems.push(`👤 ${extracted.customerName}`)
-    // ✅ FIX: only show plate if we have plate-context word, not just any number
-    if (extracted.plate) detectedItems.push(`🚗 Plate: ${extracted.plate}`)
-    // ✅ FIX: phone is separate from everything else
-    if (extracted.phone) detectedItems.push(`📞 ${extracted.phone}`)
+  const modal = document.createElement('div')
+  modal.style.cssText = `
+    background:var(--bg-elevated);border-radius:20px;
+    width:100%;max-width:640px;max-height:92vh;
+    overflow-y:auto;box-shadow:var(--shadow-lg);
+    border:1px solid var(--border);
+  `
 
-    return `
+  overlay.appendChild(modal)
+  document.body.appendChild(overlay)
+  modalEl = overlay
+
+  function getGrandTotal() {
+    return items.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0)
+  }
+
+  function render() {
+    const total = getGrandTotal()
+    modal.innerHTML = `
       <div style="
-        background:var(--bg);border-radius:var(--radius);
-        width:100%;max-width:640px;margin:auto;
-        box-shadow:0 8px 40px rgba(0,0,0,0.18);overflow:hidden;
+        display:flex;align-items:center;justify-content:space-between;
+        padding:1.25rem 1.5rem;background:var(--dark);
+        border-radius:20px 20px 0 0;position:sticky;top:0;z-index:10;
       ">
-        <!-- Header -->
-        <div style="background:var(--dark);padding:1rem 1.25rem;display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="color:#fff;font-weight:700;font-size:1rem">Smart OCR Review</div>
-            <div style="color:rgba(255,255,255,0.45);font-size:12px">Confirm extracted data before saving</div>
+        <div>
+          <div style="font-weight:700;color:#fff">Smart OCR Review</div>
+          <div style="font-size:0.8125rem;color:rgba(255,255,255,0.4);margin-top:2px">
+            Confirm extracted data before saving
           </div>
-          <button id="ocr-modal-close" style="color:rgba(255,255,255,0.5);font-size:1.2rem;padding:0.25rem">✕</button>
+        </div>
+        <button id="ocr-close" style="
+          width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.1);
+          display:flex;align-items:center;justify-content:center;
+          color:rgba(255,255,255,0.6);cursor:pointer;border:none;
+        ">${renderIcon('close', 16)}</button>
+      </div>
+
+      <div style="padding:1.5rem">
+
+        <!-- Mode -->
+        <div style="display:flex;gap:0.5rem;margin-bottom:1.25rem">
+          ${[['sale','Sale','transactions'],['expense','Expense','expenses'],['inventory','Inventory','inventory']].map(([k,l,ic]) => `
+            <button data-mode="${k}" class="mode-btn" style="
+              display:flex;align-items:center;gap:0.375rem;
+              padding:0.5rem 1rem;border-radius:var(--radius-pill);
+              font-size:0.875rem;font-weight:600;cursor:pointer;
+              border:1.5px solid ${mode===k?'var(--accent)':'var(--border)'};
+              background:${mode===k?'var(--teal-50)':'var(--bg-elevated)'};
+              color:${mode===k?'var(--accent)':'var(--muted)'};
+            ">${renderIcon(ic,14,mode===k?'var(--accent)':'var(--muted)')} ${l}</button>
+          `).join('')}
         </div>
 
-        <div style="padding:1.25rem">
-          <!-- Destination tabs -->
-          <div style="display:flex;gap:0.5rem;margin-bottom:1.25rem">
-            <button class="dest-tab btn ${destination==='sale'      ? 'btn-primary':'btn-outline'}" data-dest="sale">💚 Sale</button>
-            <button class="dest-tab btn ${destination==='expense'   ? 'btn-primary':'btn-outline'}" data-dest="expense">📋 Expense</button>
-            <button class="dest-tab btn ${destination==='inventory' ? 'btn-primary':'btn-outline'}" data-dest="inventory">📦 Inventory</button>
+        <!-- Date + Account -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">
+          <div>
+            <label class="form-label">Date</label>
+            <input type="date" class="form-input" id="ocr-date" value="${docDate}">
           </div>
-
-          <!-- Doc details -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">
-            <div class="form-group" style="margin:0">
-              <label class="form-label">Date</label>
-              <input type="date" class="form-input" id="sm-date" value="${extracted.date || new Date().toISOString().split('T')[0]}">
-            </div>
-            <div class="form-group" style="margin:0">
-              <label class="form-label">Cash Account</label>
-              <select class="form-input" id="sm-account">
-                ${(accounts||[]).map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
-              </select>
-            </div>
+          <div>
+            <label class="form-label">Cash Account</label>
+            <select class="form-input" id="ocr-account">
+              ${(accounts||[]).map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${a.name}</option>`).join('')}
+            </select>
           </div>
+        </div>
 
-          <!-- Payment method — sale only -->
-          <div id="payment-section" style="margin-bottom:1rem;${destination!=='sale'?'display:none':''}">
-            <div class="form-label" style="margin-bottom:0.5rem">Payment Method</div>
-            <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-              ${['cash','credit','bank_transfer','telebirr','cbe_birr','other'].map(pm => `
-                <button class="pay-btn btn btn-sm ${paymentMethod===pm?'btn-primary':'btn-outline'}"
-                        data-pay="${pm}" style="font-size:12px">
-                  ${{cash:'💵 Cash',credit:'📒 Credit',bank_transfer:'🏦 Bank',
-                     telebirr:'📱 Telebirr',cbe_birr:'📱 CBE Birr',other:'Other'}[pm]}
-                </button>
+        <!-- Payment (sale only) -->
+        ${mode==='sale'?`
+          <div style="margin-bottom:1rem">
+            <label class="form-label">Payment</label>
+            <div style="display:flex;gap:0.375rem;flex-wrap:wrap;margin-top:0.375rem">
+              ${['cash','credit','bank_transfer','telebirr','cbe_birr','other'].map(pm=>`
+                <button data-pay="${pm}" class="pay-btn" style="
+                  padding:0.3rem 0.75rem;border-radius:var(--radius-pill);
+                  font-size:0.8125rem;font-weight:600;cursor:pointer;
+                  border:1.5px solid ${payMethod===pm?'var(--accent)':'var(--border)'};
+                  background:${payMethod===pm?'var(--teal-50)':'var(--bg-elevated)'};
+                  color:${payMethod===pm?'var(--accent)':'var(--muted)'};
+                ">${PAY_LABELS[pm]||pm}</button>
               `).join('')}
             </div>
           </div>
-
-          <!-- Credit customer -->
-          <div id="credit-section" style="display:${isCredit?'block':'none'};margin-bottom:1rem">
-            <div style="background:#fef9c3;border:1px solid #f59e0b;border-radius:var(--radius);padding:0.75rem">
-              <div style="font-weight:600;font-size:13px;margin-bottom:0.5rem">📒 Credit Sale — Customer Required</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-                <div>
-                  <label class="form-label">Customer Name *</label>
-                  <input class="form-input" id="sm-customer-name"
-                    value="${extracted.customerName || ''}"
-                    placeholder="Full name" list="customer-list">
-                  <datalist id="customer-list">
-                    ${(customers||[]).map(c=>`<option value="${c.name}">`).join('')}
-                  </datalist>
-                </div>
-                <div>
-                  <label class="form-label">Phone</label>
-                  <input class="form-input" id="sm-customer-phone"
-                    value="${extracted.phone || ''}" placeholder="09xxxxxxxx">
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Optional customer info — all sale types except credit (credit has its own) -->
-          <div id="optional-customer-section" style="display:${isCredit?'none':'block'};margin-bottom:1rem">
+          <div style="margin-bottom:1rem">
             <details>
-              <summary style="cursor:pointer;font-size:13px;color:var(--muted);user-select:none;padding:0.4rem 0">
-                + Customer info (optional)
+              <summary style="font-size:0.8125rem;color:var(--muted);cursor:pointer">
+                ▶ + Customer info (optional)
               </summary>
-              <div style="margin-top:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
                 <div>
-                  <label class="form-label">Customer Name</label>
-                  <input class="form-input" id="sm-opt-customer-name"
-                    value="${extracted.customerName || ''}"
-                    placeholder="Optional" list="customer-list-opt">
-                  <datalist id="customer-list-opt">
-                    ${(customers||[]).map(c=>`<option value="${c.name}">`).join('')}
-                  </datalist>
+                  <label class="form-label">Name</label>
+                  <input class="form-input" id="ocr-cust-name" placeholder="Optional" list="ocr-cl">
+                  <datalist id="ocr-cl">${(customers||[]).map(c=>`<option value="${c.name}">`).join('')}</datalist>
                 </div>
                 <div>
                   <label class="form-label">Phone</label>
-                  <input class="form-input" id="sm-opt-customer-phone"
-                    value="${extracted.phone || ''}" placeholder="Optional">
-                </div>
-                <div>
-                  <label class="form-label">Vehicle Plate</label>
-                  <input class="form-input" id="sm-opt-plate"
-                    value="${extracted.plate || ''}" placeholder="Optional">
-                </div>
-                <div>
-                  <label class="form-label">Note</label>
-                  <input class="form-input" id="sm-opt-note" placeholder="Optional">
+                  <input class="form-input" id="ocr-cust-phone" placeholder="Optional">
                 </div>
               </div>
             </details>
           </div>
+        `:''}
 
-          <!-- Inventory credit toggle -->
-          <div id="inv-credit-section" style="display:${destination==='inventory'?'block':'none'};margin-bottom:1rem">
-            <div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem;background:var(--bg-light);border-radius:var(--radius);border:1px solid var(--border)">
-              <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:13.5px">
-                <input type="checkbox" id="inv-credit-toggle" style="width:16px;height:16px">
-                Purchased on credit (vendor owes)
-              </label>
-            </div>
-            <div id="vendor-section" style="display:none;margin-top:0.5rem">
-              <label class="form-label">Vendor / Supplier Name *</label>
-              <input class="form-input" id="inv-vendor" placeholder="Supplier name">
-            </div>
+        <!-- Line items header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+          <div style="font-weight:700">Line Items</div>
+          <button id="ocr-add-row" class="btn btn-outline btn-sm">+ Add Row</button>
+        </div>
+
+        <!-- Items -->
+        <div id="ocr-items" style="display:flex;flex-direction:column;gap:0.625rem">
+          ${items.map((item,i) => rowHtml(item,i)).join('')}
+        </div>
+
+        <!-- Grand total -->
+        <div style="
+          display:flex;justify-content:space-between;align-items:center;
+          margin-top:1.25rem;padding-top:1rem;border-top:1.5px solid var(--border);
+        ">
+          <span style="font-weight:700">Total</span>
+          <span id="ocr-grand-total" style="
+            font-size:1.375rem;font-weight:800;color:var(--accent);letter-spacing:-0.5px
+          ">${fmt(total)} ETB</span>
+        </div>
+
+        <!-- Actions -->
+        <div style="display:flex;gap:0.75rem;margin-top:1.25rem">
+          <button class="btn btn-outline" id="ocr-cancel" style="flex:1;justify-content:center">Cancel</button>
+          <button class="btn btn-primary" id="ocr-submit" style="flex:2;justify-content:center;font-size:1rem">
+            ${renderIcon('check',18)}
+            Register ${mode==='sale'?'Sale':mode==='expense'?'Expense':'Inventory'}
+          </button>
+        </div>
+      </div>
+    `
+    bind()
+  }
+
+  function rowHtml(item, i) {
+    const qty   = Number(item.qty)   || 1
+    const price = Number(item.price) || 0
+    const total = qty * price
+    return `
+      <div data-row="${i}" style="
+        background:var(--bg-subtle);border:1px solid var(--border);
+        border-radius:12px;padding:0.875rem;
+      ">
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.625rem">
+          <input type="text" class="form-input row-name" data-idx="${i}"
+            value="${escHtml(item.name)}" placeholder="Product name"
+            style="flex:1;font-weight:500">
+          <button class="row-del btn btn-ghost btn-sm" data-idx="${i}"
+            style="color:var(--danger);flex-shrink:0">
+            ${renderIcon('close',13)}
+          </button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem">
+          <div>
+            <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">QTY</div>
+            <input type="number" class="form-input row-qty" data-idx="${i}"
+              value="${qty}" min="0.01" step="0.01" inputmode="decimal"
+              style="font-weight:600;text-align:center">
           </div>
-
-          <!-- Auto-detected — only meaningful distinct items -->
-          ${detectedItems.length > 0 ? `
-            <div style="background:var(--accent-lt);border:1px solid var(--accent);border-radius:var(--radius);padding:0.6rem 0.85rem;margin-bottom:1rem;font-size:12.5px">
-              <div style="font-weight:600;margin-bottom:0.3rem;color:var(--accent)">⚡ Auto-detected from scan</div>
-              <div style="display:flex;gap:1rem;flex-wrap:wrap;color:var(--dark)">
-                ${detectedItems.join('')}
-              </div>
-            </div>
-          ` : ''}
-
-          <!-- Line items -->
-          <div style="font-weight:600;margin-bottom:0.75rem;display:flex;justify-content:space-between;align-items:center">
-            <span>Line Items</span>
-            <button class="btn btn-outline btn-sm" id="btn-add-line">+ Add Row</button>
+          <div>
+            <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">UNIT PRICE (ETB)</div>
+            <input type="number" class="form-input row-price" data-idx="${i}"
+              value="${price>0?price:''}" placeholder="0.00" min="0" step="0.01" inputmode="decimal"
+              style="font-weight:600;color:var(--accent)">
           </div>
-
-          <div id="line-items-container"></div>
-
-          <!-- Total -->
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:var(--bg-light);border-radius:var(--radius);margin-top:0.75rem">
-            <span style="font-weight:600">Total</span>
-            <span style="font-size:1.2rem;font-weight:700;color:var(--accent)" id="sm-total">0.00 ETB</span>
-          </div>
-
-          <!-- Actions -->
-          <div style="display:flex;gap:0.75rem;margin-top:1.25rem">
-            <button class="btn btn-outline" id="btn-sm-cancel" style="flex:1;justify-content:center">Cancel</button>
-            <button class="btn btn-primary" id="btn-sm-apply" style="flex:2;justify-content:center;font-size:1rem">
-              ✓ ${destination==='sale' ? 'Register Sale' : destination==='expense' ? 'Save Expense' : 'Add to Inventory'}
-            </button>
+          <div>
+            <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">TOTAL (ETB)</div>
+            <input type="number" class="form-input row-total" data-idx="${i}"
+              value="${total>0?total:''}" placeholder="0.00" readonly
+              style="font-weight:700;background:var(--bg-hover)">
           </div>
         </div>
+        ${item.matched?`
+          <div style="display:inline-flex;align-items:center;gap:0.3rem;margin-top:0.5rem;
+            font-size:0.75rem;font-weight:600;color:var(--teal-700);background:var(--teal-50);
+            border:1px solid var(--teal-200);border-radius:var(--radius-pill);padding:0.2rem 0.5rem;">
+            ${renderIcon('check',11,'var(--teal-700)')} Matched: ${escHtml(item.matched.item_name)}
+          </div>
+        `:''}
       </div>
     `
   }
 
-  function mount() {
-    overlay.innerHTML = buildHTML()
-    attachEvents()
-    renderLineItems()
+  function bind() {
+    modal.querySelector('#ocr-close')?.addEventListener('click', close)
+    modal.querySelector('#ocr-cancel')?.addEventListener('click', close)
+    overlay.addEventListener('click', e => { if (e.target===overlay) close() })
+
+    modal.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => { mode=b.dataset.mode; render() }))
+    modal.querySelectorAll('.pay-btn').forEach(b  => b.addEventListener('click', () => { payMethod=b.dataset.pay; render() }))
+
+    modal.querySelector('#ocr-date')?.addEventListener('change', e => { docDate=e.target.value })
+    modal.querySelector('#ocr-account')?.addEventListener('change', e => { accountId=e.target.value })
+
+    modal.querySelector('#ocr-add-row')?.addEventListener('click', () => {
+      items.push({ name:'', qty:1, price:null, total:null, matched:null })
+      const container = modal.querySelector('#ocr-items')
+      const div = document.createElement('div')
+      div.innerHTML = rowHtml(items[items.length-1], items.length-1)
+      container.appendChild(div.firstElementChild)
+      bindRows()
+    })
+
+    modal.querySelector('#ocr-submit')?.addEventListener('click', submit)
+
+    bindRows()
   }
 
-  // ── Line items renderer ───────────────────────────────────
-  function renderLineItems() {
-    const container = overlay.querySelector('#line-items-container')
-    if (!container) return
-
-    container.innerHTML = lineItems.map((item, i) => {
-      const matches = inventory?.length && item.confirmedName
-        ? fuzzyMatch(item.confirmedName, inventory, { key:'item_name', limit:4 })
-        : []
-
-      return `
-        <div style="
-          border:1px solid ${item.matched ? 'var(--accent)' : 'var(--border)'};
-          border-radius:var(--radius);padding:0.75rem;margin-bottom:0.75rem;
-          background:${item.matched ? 'var(--accent-lt)' : 'var(--bg)'}
-        " data-line="${i}">
-          <!-- Name row -->
-          <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.35rem">
-            <input class="form-input line-name" style="flex:1;font-weight:${item.matched?'600':'400'}"
-              value="${item.confirmedName}" placeholder="Product name" data-idx="${i}">
-            ${item.matched
-              ? `<span style="font-size:11px;background:var(--accent);color:#fff;padding:2px 8px;border-radius:999px;white-space:nowrap">✓ matched</span>`
-              : ''}
-            <button class="btn btn-sm" style="color:var(--danger);border:1px solid var(--border);flex-shrink:0" data-remove="${i}">✕</button>
-          </div>
-
-          <!-- Fuzzy suggestions — only if not matched -->
-          ${!item.matched && matches.length > 0 ? `
-            <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.5rem">
-              <span style="font-size:11px;color:var(--muted);align-self:center">Match:</span>
-              ${matches.map(m => `
-                <button class="match-btn" data-idx="${i}" data-item='${JSON.stringify({
-                  id:    m.id,
-                  name:  m.item_name,
-                  price: Number(m.selling_price || m.unit_cost || 0),
-                })}' style="
-                  font-size:11.5px;padding:3px 10px;border-radius:999px;
-                  border:1px solid var(--accent);background:var(--accent-lt);
-                  color:var(--accent);cursor:pointer;white-space:nowrap;
-                ">
-                  ${m.item_name} · ${Number(m.selling_price || 0).toLocaleString()} ETB
-                </button>
-              `).join('')}
-            </div>
-          ` : ''}
-
-          <!-- Qty / Price / Total -->
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem">
-            <div>
-              <label class="form-label" style="font-size:10px">QTY</label>
-              <input class="form-input line-qty" type="number" min="0.01" step="0.01"
-                value="${item.confirmedQty || 1}" data-idx="${i}" style="font-size:13px">
-            </div>
-            <div>
-              <label class="form-label" style="font-size:10px">UNIT PRICE (ETB)</label>
-              <input class="form-input line-price" type="number" min="0" step="0.01"
-                value="${item.confirmedPrice !== null ? item.confirmedPrice : ''}"
-                placeholder="0.00" data-idx="${i}" style="font-size:13px">
-            </div>
-            <div>
-              <label class="form-label" style="font-size:10px">TOTAL (ETB)</label>
-              <input class="form-input line-total" type="number" min="0" step="0.01"
-                value="${item.confirmedTotal !== null ? item.confirmedTotal : ''}"
-                placeholder="0.00" data-idx="${i}"
-                style="font-size:13px;font-weight:600;background:var(--bg-light)">
-            </div>
-          </div>
-        </div>
-      `
-    }).join('')
-
-    attachLineListeners()
-    updateTotal()
-  }
-
-  function attachLineListeners() {
-    // ✅ FIX: match button preserves existing OCR quantity
-    overlay.querySelectorAll('.match-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx      = Number(btn.dataset.idx)
-        const item     = JSON.parse(btn.dataset.item)
-        const existQty = lineItems[idx].confirmedQty || 1  // keep OCR quantity
-
-        lineItems[idx].matched        = item
-        lineItems[idx].confirmedName  = item.name
-        lineItems[idx].confirmedPrice = item.price
-        // ✅ Use existing qty from OCR, recalculate total
-        lineItems[idx].confirmedQty   = existQty
-        lineItems[idx].confirmedTotal = existQty * item.price
-        renderLineItems()
+  function bindRows() {
+    modal.querySelectorAll('.row-del').forEach(b => {
+      b.addEventListener('click', () => {
+        const i = parseInt(b.dataset.idx)
+        items.splice(i, 1)
+        if (!items.length) items.push({ name:'',qty:1,price:null,total:null,matched:null })
+        modal.querySelector('#ocr-items').innerHTML = items.map((it,idx)=>rowHtml(it,idx)).join('')
+        bindRows()
+        refreshTotal()
       })
     })
 
-    overlay.querySelectorAll('.line-name').forEach(input => {
-      input.addEventListener('input', e => {
-        const idx = Number(e.target.dataset.idx)
-        lineItems[idx].confirmedName = e.target.value
-        lineItems[idx].matched       = null
-        // Debounce re-render for suggestions
-        clearTimeout(input._t)
-        input._t = setTimeout(() => renderLineItems(), 400)
+    modal.querySelectorAll('.row-name').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const i = parseInt(inp.dataset.idx)
+        if (items[i]) items[i].name = inp.value
       })
     })
 
-    overlay.querySelectorAll('.line-qty').forEach(input => {
-      input.addEventListener('input', e => {
-        const idx   = Number(e.target.dataset.idx)
-        const qty   = parseFloat(e.target.value) || 0
-        const price = lineItems[idx].confirmedPrice || 0
-        lineItems[idx].confirmedQty   = qty
-        lineItems[idx].confirmedTotal = price > 0 ? qty * price : lineItems[idx].confirmedTotal
-        const totalInput = overlay.querySelector(`.line-total[data-idx="${idx}"]`)
-        if (totalInput && price > 0) totalInput.value = (qty * price).toFixed(2)
-        updateTotal()
+    modal.querySelectorAll('.row-qty').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const i = parseInt(inp.dataset.idx)
+        if (!items[i]) return
+        items[i].qty = parseFloat(inp.value) || 0
+        updateRow(i)
       })
     })
 
-    overlay.querySelectorAll('.line-price').forEach(input => {
-      input.addEventListener('input', e => {
-        const idx   = Number(e.target.dataset.idx)
-        const price = parseFloat(e.target.value) || 0
-        const qty   = lineItems[idx].confirmedQty || 1
-        lineItems[idx].confirmedPrice = price
-        lineItems[idx].confirmedTotal = qty * price
-        const totalInput = overlay.querySelector(`.line-total[data-idx="${idx}"]`)
-        if (totalInput) totalInput.value = (qty * price).toFixed(2)
-        updateTotal()
-      })
-    })
-
-    overlay.querySelectorAll('[data-remove]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        lineItems.splice(Number(btn.dataset.remove), 1)
-        if (lineItems.length === 0) addEmptyRow()
-        else renderLineItems()
+    // KEY FIX: price inputs update in-place — no re-render = keyboard stays open
+    modal.querySelectorAll('.row-price').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const i = parseInt(inp.dataset.idx)
+        if (!items[i]) return
+        items[i].price = parseFloat(inp.value) || 0
+        updateRow(i)
       })
     })
   }
 
-  function updateTotal() {
-    const total = lineItems.reduce((s, i) => s + (Number(i.confirmedTotal) || 0), 0)
-    const el = overlay.querySelector('#sm-total')
-    if (el) el.textContent = `${total.toLocaleString('en-ET', { minimumFractionDigits:2 })} ETB`
+  function updateRow(i) {
+    const qty   = Number(items[i].qty)   || 0
+    const price = Number(items[i].price) || 0
+    const total = qty * price
+    items[i].total = total
+
+    // Update total field in-place
+    const totalInp = modal.querySelector(`.row-total[data-idx="${i}"]`)
+    if (totalInp) totalInp.value = total > 0 ? total.toFixed(2) : ''
+
+    refreshTotal()
   }
 
-  function addEmptyRow() {
-    lineItems.push({ confirmedName:'', confirmedQty:1, confirmedPrice:null, confirmedTotal:null, matched:null })
-    renderLineItems()
+  function refreshTotal() {
+    const el = modal.querySelector('#ocr-grand-total')
+    if (el) el.textContent = fmt(getGrandTotal()) + ' ETB'
   }
 
-  // ── Events ────────────────────────────────────────────────
-  function attachEvents() {
-    overlay.querySelector('#ocr-modal-close').addEventListener('click', () => overlay.remove())
-    overlay.querySelector('#btn-sm-cancel').addEventListener('click', () => overlay.remove())
-    overlay.querySelector('#btn-add-line').addEventListener('click', addEmptyRow)
+  // ── Submit ──────────────────────────────────────────────
+  async function submit() {
+    const valid = items.filter(i => i.name?.trim())
+    if (!valid.length) { showToast('Add at least one item','error'); return }
 
-    // Destination
-    overlay.querySelectorAll('.dest-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        destination = btn.dataset.dest
-        mount()
-      })
-    })
-
-    // Payment
-    overlay.querySelectorAll('.pay-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        paymentMethod = btn.dataset.pay
-        isCredit      = paymentMethod === 'credit'
-        overlay.querySelectorAll('.pay-btn').forEach(b => {
-          b.classList.toggle('btn-primary', b.dataset.pay === paymentMethod)
-          b.classList.toggle('btn-outline',  b.dataset.pay !== paymentMethod)
-        })
-        overlay.querySelector('#credit-section').style.display          = isCredit ? 'block' : 'none'
-        overlay.querySelector('#optional-customer-section').style.display = isCredit ? 'none'  : 'block'
-      })
-    })
-
-    // Inventory credit toggle
-    overlay.querySelector('#inv-credit-toggle')?.addEventListener('change', e => {
-      overlay.querySelector('#vendor-section').style.display = e.target.checked ? 'block' : 'none'
-    })
-
-    // Apply
-    overlay.querySelector('#btn-sm-apply').addEventListener('click', handleApply)
-  }
-
-  // ── Apply handler ─────────────────────────────────────────
-  async function handleApply() {
-    const date    = overlay.querySelector('#sm-date').value
-    const account = overlay.querySelector('#sm-account').value
-    const total   = lineItems.reduce((s, i) => s + (Number(i.confirmedTotal) || 0), 0)
-
-    if (!total && destination !== 'inventory') { alert('Add at least one item with a price'); return }
-    if (isCredit && !overlay.querySelector('#sm-customer-name')?.value.trim()) {
-      alert('Customer name is required for credit sales'); return
-    }
-
-    const btn = overlay.querySelector('#btn-sm-apply')
+    const btn = modal.querySelector('#ocr-submit')
     btn.textContent = 'Saving...'
     btn.disabled    = true
 
-    try {
-      if (destination === 'sale')      await applySale({ date, account, total })
-      else if (destination === 'expense') await applyExpense({ date, account, total })
-      else                             await applyInventory()
+    const date     = modal.querySelector('#ocr-date')?.value || docDate
+    const accId    = modal.querySelector('#ocr-account')?.value || accountId
+    const totalAmt = getGrandTotal()
 
-      // ✅ Learn from this session
-      await learnFromSession({
-        destination,
-        lineItems,
-        paymentMethod,
-        extraFields: {},
-      })
+    try {
+      if (mode === 'sale') {
+        await doSale(valid, date, accId, totalAmt)
+      } else if (mode === 'expense') {
+        await doExpense(valid, date, accId, totalAmt)
+      } else {
+        await doInventory(valid)
+      }
 
       await supabase.from('ocr_logs').update({
         status:            'applied',
-        destination_table: destination,
-      }).eq('id', log.id)
+        destination_table: mode==='inventory'?'inventory_items':mode,
+        user_edited_data:  { items:valid, date, totalAmt, mode },
+      }).eq('id', logId)
 
-      overlay.remove()
-      sessionStorage.removeItem('ocr_log_id')
-      if (onComplete) onComplete()
-      else navigate('/dashboard')
+      try { await audit.action('ocr_applied', { logId, mode, totalAmt }) } catch(_){}
 
-    } catch (err) {
-      console.error('Apply error:', err)
-      alert(`Error: ${err.message}`)
-      btn.textContent = `✓ ${destination === 'sale' ? 'Register Sale' : destination === 'expense' ? 'Save Expense' : 'Add to Inventory'}`
-      btn.disabled = false
+      showToast('Saved successfully', 'success')
+      close()
+      setTimeout(() => navigate(window.location.pathname), 500)
+
+    } catch(err) {
+      console.error('OCR submit:', err)
+      showToast(`Failed: ${err.message}`, 'error')
+      btn.innerHTML = `${renderIcon('check',18)} Register ${mode==='sale'?'Sale':mode==='expense'?'Expense':'Inventory'}`
+      btn.disabled  = false
     }
   }
 
-  async function applySale({ date, account, total }) {
+  async function doSale(valid, date, accId, totalAmt) {
+    const isCredit  = payMethod === 'credit'
+    const custName  = modal.querySelector('#ocr-cust-name')?.value?.trim()
+    const custPhone = modal.querySelector('#ocr-cust-phone')?.value?.trim()
+
     const { data: sale, error } = await supabase.from('sales').insert({
       store_id:        currentStore?.id,
-      cash_account_id: isCredit ? null : (account || null),
+      cash_account_id: isCredit ? null : (accId||null),
       sale_date:       date,
-      total_amount:    total,
-      payment_method:  isCredit ? 'credit' : paymentMethod,
+      total_amount:    totalAmt,
+      payment_method:  payMethod,
       source:          'ocr',
-      ocr_log_id:      log.id,
+      ocr_log_id:      logId,
     }).select().single()
+
     if (error) throw error
 
-    for (const item of lineItems) {
-      if (!item.confirmedName) continue
+    for (const item of valid) {
       await supabase.from('sale_items').insert({
         sale_id:            sale.id,
-        item_id:            item.matched?.id || null,
-        item_name_snapshot: item.confirmedName,
-        quantity:           item.confirmedQty  || 1,
-        unit_price:         item.confirmedPrice || 0,
+        item_name_snapshot: item.name,
+        quantity:           item.qty   || 1,
+        unit_price:         item.price || 0,
       })
     }
 
-    if (isCredit) {
-      const custName  = overlay.querySelector('#sm-customer-name').value.trim()
-      const custPhone = overlay.querySelector('#sm-customer-phone')?.value.trim() || null
-      let customer    = customers?.find(c => c.name.toLowerCase() === custName.toLowerCase())
-      if (!customer) {
-        const { data } = await supabase.from('customers').insert({
-          store_id: currentStore?.id,
-          name:     custName,
-          phone:    custPhone,
-        }).select().single()
-        customer = data
+    if (isCredit && custName) {
+      const { data: existing } = await supabase.from('customers')
+        .select('id').eq('store_id', currentStore?.id).ilike('name', custName).maybeSingle()
+
+      let custId = existing?.id
+      if (!custId) {
+        const { data: nc } = await supabase.from('customers').insert({
+          store_id: currentStore?.id, name: custName, phone: custPhone||null,
+        }).select('id').single()
+        custId = nc?.id
       }
-      await supabase.from('credit_sales').insert({
-        store_id:    currentStore?.id,
-        sale_id:     sale.id,
-        customer_id: customer.id,
-        amount_owed: total,
-        status:      'unpaid',
-      })
-    }
 
-    // Save optional customer note even for non-credit sales
-    const optName  = overlay.querySelector('#sm-opt-customer-name')?.value.trim()
-    const optPhone = overlay.querySelector('#sm-opt-customer-phone')?.value.trim()
-    const optPlate = overlay.querySelector('#sm-opt-plate')?.value.trim()
-    const optNote  = overlay.querySelector('#sm-opt-note')?.value.trim()
-
-    if (optName && !isCredit) {
-      let customer = customers?.find(c => c.name.toLowerCase() === optName.toLowerCase())
-      if (!customer) {
-        await supabase.from('customers').insert({
-          store_id: currentStore?.id,
-          name:     optName,
-          phone:    optPhone || null,
-          notes:    [optPlate ? `Plate: ${optPlate}` : '', optNote].filter(Boolean).join(' · ') || null,
+      if (custId) {
+        await supabase.from('credit_sales').insert({
+          store_id: currentStore?.id, sale_id: sale.id,
+          customer_id: custId, amount_owed: totalAmt, status: 'unpaid',
         })
       }
     }
   }
 
-  async function applyExpense({ date, account, total }) {
-    await supabase.from('expenses').insert({
+  async function doExpense(valid, date, accId, totalAmt) {
+    const { error } = await supabase.from('expenses').insert({
       store_id:        currentStore?.id,
-      cash_account_id: account || null,
+      cash_account_id: accId||null,
       expense_date:    date,
-      amount:          total,
-      description:     lineItems.map(i => i.confirmedName).filter(Boolean).join(', '),
+      amount:          totalAmt,
+      description:     valid.map(i=>i.name).join(', '),
       source:          'ocr',
-      ocr_log_id:      log.id,
+      ocr_log_id:      logId,
     })
+    if (error) throw error
   }
 
-  async function applyInventory() {
-    const isOnCredit = overlay.querySelector('#inv-credit-toggle')?.checked
-    const vendor     = overlay.querySelector('#inv-vendor')?.value.trim()
-
-    for (const item of lineItems) {
-      if (!item.confirmedName) continue
-      if (item.matched?.id) {
-        await supabase.from('stock_movements').insert({
-          store_id:      currentStore?.id,
-          item_id:       item.matched.id,
-          movement_type: 'in',
-          quantity:      item.confirmedQty || 1,
-          unit_cost:     item.confirmedPrice || null,
-          source:        'ocr',
-        })
-      } else {
-        await supabase.from('inventory_items').insert({
-          store_id:  currentStore?.id,
-          item_name: item.confirmedName,
-          quantity:  item.confirmedQty  || 0,
-          unit_cost: item.confirmedPrice || null,
-        })
-      }
-    }
-
-    if (isOnCredit && vendor) {
-      const total = lineItems.reduce((s, i) => s + (Number(i.confirmedTotal) || 0), 0)
-      await supabase.from('vendor_debts').insert({
-        store_id:    currentStore?.id,
-        vendor_name: vendor,
-        amount_owed: total,
+  async function doInventory(valid) {
+    for (const item of valid) {
+      const { error } = await supabase.from('inventory_items').insert({
+        store_id:      currentStore?.id,
+        item_name:     item.name,
+        quantity:      item.qty   || 0,
+        unit_cost:     item.price || null,
+        selling_price: item.price || null,
       })
+      if (error) throw error
     }
   }
 
-  document.body.appendChild(overlay)
-  mount()
+  function close() {
+    if (modalEl) { modalEl.remove(); modalEl = null }
+  }
+
+  render()
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+const PAY_LABELS = {
+  cash:'Cash', credit:'Credit', bank_transfer:'Bank',
+  telebirr:'Telebirr', cbe_birr:'CBE Birr', other:'Other',
+}
+
+function fmt(n) {
+  return Number(n||0).toLocaleString('en-ET',{minimumFractionDigits:2,maximumFractionDigits:2})
+}
+
+function escHtml(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+function showToast(msg, type='info') {
+  const t = document.createElement('div')
+  t.className = `toast toast-${type}`
+  t.textContent = msg
+  let wrap = document.querySelector('.toast-container')
+  if (!wrap) { wrap=document.createElement('div'); wrap.className='toast-container'; document.body.appendChild(wrap) }
+  wrap.appendChild(t)
+  setTimeout(() => t.remove(), 3500)
 }
