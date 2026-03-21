@@ -229,69 +229,77 @@ export async function render(container) {
 
   // ── Submit ───────────────────────────────────────────────
   async function handleAuth() {
-    const email    = container.querySelector('#auth-email').value.trim()
-    const password = container.querySelector('#auth-password').value
-    const remember = container.querySelector('#remember-me')?.checked
-    const btn      = container.querySelector('#btn-auth')
+  const email    = container.querySelector('#auth-email').value.trim()
+  const password = container.querySelector('#auth-password').value
+  const remember = container.querySelector('#remember-me')?.checked
+  const btn      = container.querySelector('#btn-auth')
 
-    if (!email)              { showError('Please enter your email');    return }
-    if (!password)           { showError('Please enter your password'); return }
-    if (password.length < 6) { showError('Password must be at least 6 characters'); return }
+  if (!email)              { showError('Please enter your email');    return }
+  if (!password)           { showError('Please enter your password'); return }
+  if (password.length < 6) { showError('Password must be at least 6 characters'); return }
 
-    btn.textContent = isSignUp ? 'Creating account...' : 'Signing in...'
-    btn.disabled    = true
-    hideError()
+  btn.textContent = isSignUp ? 'Creating account...' : 'Signing in...'
+  btn.disabled    = true
+  hideError()
 
-    try {
-      if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({ email, password })
-        if (error) throw error
-        appStore.getState().setUser(data.user)
-        navigate('/onboarding')
+  try {
+    // Hard 8-second timeout — prevents infinite "Signing in..."
+    const authTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Connection timed out. Check your internet and try again.')), 8000)
+    )
 
+    if (isSignUp) {
+      const { data, error } = await Promise.race([
+        supabase.auth.signUp({ email, password }),
+        authTimeout
+      ])
+      if (error) throw error
+      appStore.getState().setUser(data.user)
+      navigate('/onboarding')
+
+    } else {
+      const { data, error } = await Promise.race([
+        supabase.auth.signInWithPassword({ email, password }),
+        authTimeout
+      ])
+      if (error) throw error
+
+      if (remember) {
+        localStorage.setItem('storeos-saved-email', email)
+        localStorage.setItem('storeos-remember', 'true')
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-
-        // Save remember me preference
-        if (remember) {
-          localStorage.setItem('storeos-saved-email', email)
-          localStorage.setItem('storeos-remember', 'true')
-        } else {
-          localStorage.removeItem('storeos-saved-email')
-          localStorage.setItem('storeos-remember', 'false')
-        }
-
-        appStore.getState().setUser(data.user)
-
-        // Check stores
-        const { data: owner } = await supabase
-          .from('owners').select('id').eq('email', email).single()
-
-        if (!owner) { navigate('/onboarding'); return }
-
-        const { data: stores } = await supabase
-          .from('stores').select('*').eq('owner_id', owner.id)
-
-        if (!stores || stores.length === 0) { navigate('/onboarding'); return }
-
-        appStore.getState().setStores(stores)
-        appStore.getState().setCurrentStore(stores[0])
-        navigate('/dashboard')
+        localStorage.removeItem('storeos-saved-email')
+        localStorage.setItem('storeos-remember', 'false')
       }
 
-    } catch(err) {
-      showError(
-        err.message === 'Invalid login credentials'
-          ? 'Wrong email or password. Please try again.'
-          : err.message
-      )
-    } finally {
-      btn.textContent = isSignUp ? 'Create Account' : 'Sign In'
-      btn.disabled    = false
-    }
-  }
+      appStore.getState().setUser(data.user)
 
+      const { data: owner } = await supabase
+        .from('owners').select('id').eq('email', email).maybeSingle()
+
+      if (!owner) { navigate('/onboarding'); return }
+
+      const { data: stores } = await supabase
+        .from('stores').select('*').eq('owner_id', owner.id)
+
+      if (!stores || stores.length === 0) { navigate('/onboarding'); return }
+
+      appStore.getState().setStores(stores)
+      appStore.getState().setCurrentStore(stores[0])
+      navigate('/dashboard')
+    }
+
+  } catch(err) {
+    showError(
+      err.message === 'Invalid login credentials'
+        ? 'Wrong email or password. Please try again.'
+        : err.message
+    )
+  } finally {
+    btn.textContent = isSignUp ? 'Create Account' : 'Sign In'
+    btn.disabled    = false
+  }
+}
   container.querySelector('#btn-auth').addEventListener('click', handleAuth)
   container.querySelectorAll('#auth-email, #auth-password').forEach(input => {
     input.addEventListener('keydown', e => { if (e.key === 'Enter') handleAuth() })
