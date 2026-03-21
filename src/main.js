@@ -1,5 +1,3 @@
-import './styles/mobile.css'
-import { initTableEnhancer } from './utils/mobile-tables.js'
 // ── Global error handlers ──────────────────────────────────
 window.addEventListener('error', (e) => {
   console.error('Global error:', e.message)
@@ -28,11 +26,13 @@ window.addEventListener('unhandledrejection', (e) => {
 })
 
 import './styles/main.css'
+import './styles/mobile.css'
 import { initRouter, navigate } from './router.js'
 import { supabase } from './supabase.js'
 import { appStore } from './store.js'
 import { renderNav } from './components/nav.js'
 import { initMobileNav } from './components/mobile-nav.js'
+import { initTableEnhancer } from './utils/mobile-tables.js'
 
 const app = document.getElementById('app')
 let navEl        = null
@@ -40,7 +40,6 @@ let contentEl    = null
 let layoutBuilt  = false
 let routerInited = false
 
-// ── Loading screen ─────────────────────────────────────────
 function showLoadingScreen() {
   app.innerHTML = `
     <div id="app-loader" style="
@@ -51,8 +50,7 @@ function showLoadingScreen() {
       font-family:-apple-system,BlinkMacSystemFont,'Inter',system-ui,sans-serif;
     ">
       <div style="
-        width:48px;height:48px;
-        background:#0D9488;border-radius:14px;
+        width:48px;height:48px;background:#0D9488;border-radius:14px;
         display:flex;align-items:center;justify-content:center;
         box-shadow:0 8px 24px rgba(13,148,136,0.3);
         animation:logo-pulse 1.8s ease-in-out infinite;
@@ -71,15 +69,14 @@ function showLoadingScreen() {
       <div style="font-size:0.8125rem;color:#6B7280">Loading...</div>
       <style>
         @keyframes logo-pulse {
-          0%,100% { transform:scale(1);   box-shadow:0 8px 24px rgba(13,148,136,0.3); }
-          50%      { transform:scale(1.06);box-shadow:0 12px 32px rgba(13,148,136,0.45); }
+          0%,100%{transform:scale(1);box-shadow:0 8px 24px rgba(13,148,136,0.3);}
+          50%{transform:scale(1.06);box-shadow:0 12px 32px rgba(13,148,136,0.45);}
         }
       </style>
     </div>
   `
 }
 
-// ── Mobile nav visibility ──────────────────────────────────
 function hideMobileNav() {
   const mobileNav = document.getElementById('mobile-nav')
   const fabCamera = document.getElementById('fab-camera')
@@ -95,7 +92,6 @@ function showMobileNav() {
   if (fabCamera) fabCamera.style.display = 'flex'
 }
 
-// ── Load page ──────────────────────────────────────────────
 export async function loadPage(pageName) {
   const fullScreenPages = ['auth', 'onboarding']
 
@@ -107,7 +103,6 @@ export async function loadPage(pageName) {
     contentEl.style.width = '100%'
     app.appendChild(contentEl)
     hideMobileNav()
-
     try {
       const module = await import(`./pages/${pageName}.js`)
       module.render(contentEl)
@@ -118,24 +113,19 @@ export async function loadPage(pageName) {
     return
   }
 
-  // Normal page — ensure layout in DOM
-  if (!document.querySelector('.sidebar')) {
-    buildLayout()
-  }
+  if (!document.querySelector('.sidebar')) buildLayout()
 
+  // Always show mobile nav on authenticated pages
   showMobileNav()
 
-  // Clear content safely
   if (contentEl && document.body.contains(contentEl)) {
     contentEl.innerHTML = ''
   } else {
-    // contentEl lost — rebuild
     buildLayout()
   }
 
   try {
     const module = await import(`./pages/${pageName}.js`)
-    // Double-check container still valid before rendering
     if (contentEl && document.body.contains(contentEl)) {
       module.render(contentEl)
     }
@@ -145,7 +135,6 @@ export async function loadPage(pageName) {
     return
   }
 
-  // Update active nav
   if (navEl && document.body.contains(navEl)) {
     navEl.querySelectorAll('.nav-item').forEach(el => {
       el.classList.toggle('active', el.dataset.path === window.location.pathname)
@@ -153,39 +142,29 @@ export async function loadPage(pageName) {
   }
 }
 
-// ── Handle chunk load failure ──────────────────────────────
 function handleChunkError(pageName) {
   const key = `chunk-retry-${pageName}`
   if (!sessionStorage.getItem(key)) {
-    // First failure — reload to bust Vercel cache
     sessionStorage.setItem(key, '1')
     window.location.reload()
   } else {
-    // Second failure — show error, don't loop
     sessionStorage.removeItem(key)
     if (contentEl && document.body.contains(contentEl)) {
       contentEl.innerHTML = `
-        <div style="
-          display:flex;flex-direction:column;align-items:center;
+        <div style="display:flex;flex-direction:column;align-items:center;
           justify-content:center;min-height:60vh;gap:1rem;
-          color:#6B7280;text-align:center;padding:2rem;
-        ">
+          color:#6B7280;text-align:center;padding:2rem;">
           <div style="font-size:2rem">⚠️</div>
-          <div style="font-weight:600;color:#111827;font-size:1rem">Page failed to load</div>
+          <div style="font-weight:600;color:#111827">Page failed to load</div>
           <div style="font-size:0.875rem">Check your connection and try again</div>
           <button onclick="window.location.reload()" style="
-            padding:0.5rem 1.25rem;border-radius:8px;
-            background:#0D9488;color:#fff;border:none;
-            font-size:0.875rem;font-weight:600;cursor:pointer;
-            margin-top:0.5rem;
-          ">Reload App</button>
-        </div>
-      `
+            padding:0.5rem 1.25rem;border-radius:8px;background:#0D9488;
+            color:#fff;border:none;font-size:0.875rem;font-weight:600;
+            cursor:pointer;margin-top:0.5rem;">Reload App</button>
+        </div>`
     }
   }
 }
-
-// ── Build layout ───────────────────────────────────────────
 
 export function buildLayout() {
   const navExists     = document.querySelector('.sidebar')
@@ -211,7 +190,6 @@ export function buildLayout() {
     initMobileNav()
   }
 
-  // Auto-enhance tables for mobile card view — ADD THESE TWO LINES
   if (!window._tableEnhancerInited) {
     window._tableEnhancerInited = true
     initTableEnhancer()
@@ -227,7 +205,6 @@ export function buildFullScreen() {
   app.appendChild(contentEl)
 }
 
-// ── Load user data ─────────────────────────────────────────
 async function loadUserData(user) {
   try {
     const { data: owner } = await supabase
@@ -237,6 +214,7 @@ async function loadUserData(user) {
       .maybeSingle()
 
     if (!owner) {
+      // New user — clear loading screen and go to onboarding
       buildFullScreen()
       if (!routerInited) { initRouter(); routerInited = true }
       navigate('/onboarding')
@@ -259,13 +237,17 @@ async function loadUserData(user) {
     appStore.getState().setCurrentStore(stores[0])
     buildLayout()
 
-    // Fix URL if stuck on /auth or /
-    if (window.location.pathname === '/auth' ||
-        window.location.pathname === '/') {
+    if (
+      window.location.pathname === '/auth' ||
+      window.location.pathname === '/'
+    ) {
       window.history.replaceState({}, '', '/dashboard')
     }
 
     if (!routerInited) { initRouter(); routerInited = true }
+
+    // Critical — show mobile nav after login completes
+    showMobileNav()
 
   } catch(err) {
     console.error('loadUserData error:', err)
@@ -275,16 +257,12 @@ async function loadUserData(user) {
   }
 }
 
-// ── Init ───────────────────────────────────────────────────
 async function init() {
   if (localStorage.getItem('storeos-mode') === 'lite') {
     document.body.classList.add('lite-mode')
   }
 
-  // Show loading immediately — no blank page ever
   showLoadingScreen()
-
-  // Wait for Supabase auth lock to stabilize
   await new Promise(r => setTimeout(r, 150))
 
   let session = null
@@ -312,7 +290,6 @@ async function init() {
   await loadUserData(session.user)
 }
 
-// ── Auth state change ──────────────────────────────────────
 supabase.auth.onAuthStateChange(async (event, session) => {
   if (event === 'SIGNED_IN' && session) {
     const currentUser = appStore.getState().user
@@ -321,7 +298,6 @@ supabase.auth.onAuthStateChange(async (event, session) => {
       await loadUserData(session.user)
     }
   }
-
   if (event === 'SIGNED_OUT') {
     appStore.getState().setUser(null)
     appStore.getState().setStores([])

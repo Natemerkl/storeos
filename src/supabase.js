@@ -9,11 +9,9 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     autoRefreshToken:   true,
     detectSessionInUrl: true,
     storageKey:         'storeos-auth',
-    lock: (name, acquireTimeout, fn) => fn(), // bypass lock mechanism
-  },
-  global: {
-    headers: { 'x-app-name': 'storeos' }
+    lock: (name, acquireTimeout, fn) => fn(),
   }
+  // REMOVED: global headers — x-app-name causes CORS block on Edge Functions
 })
 
 window._supabase = supabase
