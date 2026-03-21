@@ -8,9 +8,19 @@ export async function render(container) {
 
   let isSignUp = false
 
-  // Check for saved email
+  // Pre-fill saved email from remember me
   const savedEmail = localStorage.getItem('storeos-saved-email') || ''
   const rememberMe = localStorage.getItem('storeos-remember') === 'true'
+
+  // Check if already authenticated — use getUser() not getSession()
+  // getUser() performs server-side JWT verification (more secure)
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      // Already logged in — let main.js onAuthStateChange handle redirect
+      // Don't navigate here to avoid race condition
+    }
+  } catch(_) {}
 
   container.innerHTML = `
     <div style="
@@ -24,25 +34,28 @@ export async function render(container) {
         <!-- Logo -->
         <div style="text-align:center;margin-bottom:2rem">
           <div style="
-            display:inline-flex;align-items:center;gap:0.5rem;
+            display:inline-flex;align-items:center;gap:0.625rem;
             font-size:1.75rem;font-weight:800;color:var(--dark);letter-spacing:-0.5px;
           ">
             <div style="
-              width:40px;height:40px;background:var(--accent);border-radius:12px;
+              width:44px;height:44px;background:var(--accent);border-radius:13px;
               display:flex;align-items:center;justify-content:center;
-            ">${renderIcon('store', 20, '#fff')}</div>
+              box-shadow:0 4px 16px rgba(13,148,136,0.3);
+            ">${renderIcon('store', 22, '#fff')}</div>
             Store<span style="color:var(--accent)">OS</span>
           </div>
-          <div style="color:var(--muted);font-size:0.9375rem;margin-top:0.5rem" id="auth-subtitle">
-            Sign in to your account
-          </div>
+          <div style="
+            color:var(--muted);font-size:0.9375rem;margin-top:0.5rem;
+          " id="auth-subtitle">Sign in to your account</div>
         </div>
 
         <!-- Card -->
         <div style="
-          background:#fff;border-radius:24px;padding:2rem;
-          box-shadow:0 4px 24px rgba(0,0,0,0.07);border:1px solid var(--border);
+          background:#fff;border-radius:20px;padding:1.75rem;
+          box-shadow:0 4px 24px rgba(0,0,0,0.07);
+          border:1px solid var(--border);
         ">
+
           <!-- Error banner -->
           <div id="auth-error" style="
             display:none;
@@ -56,8 +69,9 @@ export async function render(container) {
             <span id="auth-error-text"></span>
           </div>
 
+          <!-- Email -->
           <div class="form-group">
-            <label class="form-label">Email address</label>
+            <label class="form-label" for="auth-email">Email address</label>
             <input
               class="form-input"
               id="auth-email"
@@ -69,8 +83,9 @@ export async function render(container) {
             >
           </div>
 
+          <!-- Password -->
           <div class="form-group">
-            <label class="form-label">Password</label>
+            <label class="form-label" for="auth-password">Password</label>
             <div style="position:relative">
               <input
                 class="form-input"
@@ -80,19 +95,30 @@ export async function render(container) {
                 autocomplete="current-password"
                 style="font-size:1rem;padding-right:2.75rem"
               >
-              <button id="toggle-password" style="
-                position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);
-                color:var(--muted);display:flex;align-items:center;
-              " type="button">${renderIcon('scan', 16)}</button>
+              <button
+                id="toggle-password"
+                type="button"
+                aria-label="Toggle password visibility"
+                style="
+                  position:absolute;right:0.75rem;top:50%;
+                  transform:translateY(-50%);
+                  color:var(--muted);display:flex;align-items:center;
+                  background:none;border:none;cursor:pointer;padding:4px;
+                "
+              >${renderIcon('scan', 16)}</button>
             </div>
           </div>
 
-          <!-- Remember me -->
+          <!-- Remember me + Forgot password -->
           <div id="remember-row" style="
             display:flex;align-items:center;justify-content:space-between;
             margin-bottom:1.25rem;
           ">
-            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.875rem;color:var(--muted)">
+            <label style="
+              display:flex;align-items:center;gap:0.5rem;
+              cursor:pointer;font-size:0.875rem;color:var(--muted);
+              user-select:none;
+            ">
               <input
                 type="checkbox"
                 id="remember-me"
@@ -101,29 +127,39 @@ export async function render(container) {
               >
               Remember me
             </label>
-            <button id="btn-forgot" style="
-              font-size:0.8125rem;color:var(--accent);font-weight:500;
-              background:none;border:none;cursor:pointer;padding:0;
-            ">Forgot password?</button>
+            <button
+              id="btn-forgot"
+              type="button"
+              style="
+                font-size:0.8125rem;color:var(--accent);font-weight:500;
+                background:none;border:none;cursor:pointer;padding:0;
+              "
+            >Forgot password?</button>
           </div>
 
           <!-- Submit -->
           <button
             class="btn btn-primary"
             id="btn-auth"
-            style="width:100%;justify-content:center;padding:0.75rem;font-size:1rem;border-radius:14px"
-          >
-            Sign In
-          </button>
+            type="button"
+            style="
+              width:100%;justify-content:center;
+              padding:0.75rem;font-size:1rem;
+              border-radius:14px;
+            "
+          >Sign In</button>
 
+          <!-- Divider -->
           <div style="
-            display:flex;align-items:center;gap:0.75rem;margin:1.25rem 0;
+            display:flex;align-items:center;gap:0.75rem;
+            margin:1.25rem 0;
           ">
             <div style="flex:1;height:1px;background:var(--border)"></div>
             <span style="font-size:0.8125rem;color:var(--muted)">or</span>
             <div style="flex:1;height:1px;background:var(--border)"></div>
           </div>
 
+          <!-- Toggle sign in / sign up -->
           <div style="text-align:center">
             <span style="font-size:0.875rem;color:var(--muted)" id="toggle-label">
               Don't have an account?
@@ -131,58 +167,74 @@ export async function render(container) {
             <button
               class="btn btn-ghost btn-sm"
               id="btn-toggle"
+              type="button"
               style="color:var(--accent);font-weight:600;padding:0 0.25rem"
-            >
-              Sign Up
-            </button>
+            >Sign Up</button>
           </div>
         </div>
 
-        <!-- Forgot password panel (hidden by default) -->
+        <!-- Forgot password panel -->
         <div id="forgot-panel" style="
           display:none;
-          background:#fff;border-radius:24px;padding:1.5rem;
-          box-shadow:0 4px 24px rgba(0,0,0,0.07);border:1px solid var(--border);
+          background:#fff;border-radius:20px;padding:1.5rem;
+          box-shadow:0 4px 24px rgba(0,0,0,0.07);
+          border:1px solid var(--border);
           margin-top:1rem;
         ">
-          <div style="font-weight:700;margin-bottom:0.5rem">Reset Password</div>
+          <div style="font-weight:700;margin-bottom:0.4rem">Reset Password</div>
           <div style="font-size:0.875rem;color:var(--muted);margin-bottom:1rem">
             Enter your email and we'll send a reset link.
           </div>
           <div style="display:flex;gap:0.5rem">
-            <input class="form-input" id="reset-email"
-              type="email" placeholder="your@email.com" style="flex:1">
-            <button class="btn btn-primary" id="btn-reset">Send</button>
+            <input
+              class="form-input"
+              id="reset-email"
+              type="email"
+              placeholder="your@email.com"
+              style="flex:1"
+            >
+            <button class="btn btn-primary" id="btn-reset" type="button">Send</button>
           </div>
-          <div id="reset-status" style="font-size:0.8125rem;margin-top:0.5rem;display:none"></div>
+          <div id="reset-status" style="
+            font-size:0.8125rem;margin-top:0.5rem;display:none
+          "></div>
         </div>
 
-        <div style="text-align:center;margin-top:1.5rem;font-size:0.8125rem;color:var(--muted)">
+        <div style="
+          text-align:center;margin-top:1.5rem;
+          font-size:0.8125rem;color:var(--muted);
+        ">
           Secure · Encrypted · Your data stays yours
         </div>
+
       </div>
     </div>
   `
 
-  // ── Toggle sign in / sign up ─────────────────────────────
+  // ── Toggle sign in / sign up ───────────────────────────
   container.querySelector('#btn-toggle').addEventListener('click', () => {
     isSignUp = !isSignUp
-    container.querySelector('#auth-subtitle').textContent = isSignUp ? 'Create your account' : 'Sign in to your account'
-    container.querySelector('#btn-auth').textContent      = isSignUp ? 'Create Account' : 'Sign In'
-    container.querySelector('#toggle-label').textContent  = isSignUp ? 'Already have an account?' : "Don't have an account?"
-    container.querySelector('#btn-toggle').textContent    = isSignUp ? 'Sign In' : 'Sign Up'
-    container.querySelector('#remember-row').style.display = isSignUp ? 'none' : 'flex'
+    container.querySelector('#auth-subtitle').textContent =
+      isSignUp ? 'Create your account' : 'Sign in to your account'
+    container.querySelector('#btn-auth').textContent =
+      isSignUp ? 'Create Account' : 'Sign In'
+    container.querySelector('#toggle-label').textContent =
+      isSignUp ? 'Already have an account?' : "Don't have an account?"
+    container.querySelector('#btn-toggle').textContent =
+      isSignUp ? 'Sign In' : 'Sign Up'
+    container.querySelector('#remember-row').style.display =
+      isSignUp ? 'none' : 'flex'
     container.querySelector('#forgot-panel').style.display = 'none'
     hideError()
   })
 
-  // ── Password visibility ──────────────────────────────────
+  // ── Password visibility ────────────────────────────────
   container.querySelector('#toggle-password').addEventListener('click', () => {
     const input = container.querySelector('#auth-password')
     input.type  = input.type === 'password' ? 'text' : 'password'
   })
 
-  // ── Forgot password ──────────────────────────────────────
+  // ── Forgot password ────────────────────────────────────
   container.querySelector('#btn-forgot').addEventListener('click', () => {
     const panel = container.querySelector('#forgot-panel')
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none'
@@ -191,13 +243,13 @@ export async function render(container) {
   })
 
   container.querySelector('#btn-reset').addEventListener('click', async () => {
-    const email     = container.querySelector('#reset-email').value.trim()
-    const statusEl  = container.querySelector('#reset-status')
-    const btn       = container.querySelector('#btn-reset')
+    const email    = container.querySelector('#reset-email').value.trim()
+    const statusEl = container.querySelector('#reset-status')
+    const btn      = container.querySelector('#btn-reset')
     if (!email) return
 
-    btn.textContent  = 'Sending...'
-    btn.disabled     = true
+    btn.textContent = 'Sending...'
+    btn.disabled    = true
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth`
@@ -215,7 +267,7 @@ export async function render(container) {
     btn.disabled    = false
   })
 
-  // ── Error helpers ────────────────────────────────────────
+  // ── Error helpers ──────────────────────────────────────
   function showError(msg) {
     const el   = container.querySelector('#auth-error')
     const text = container.querySelector('#auth-error-text')
@@ -227,85 +279,101 @@ export async function render(container) {
     if (el) el.style.display = 'none'
   }
 
-  // ── Submit ───────────────────────────────────────────────
+  // ── Main auth handler ──────────────────────────────────
   async function handleAuth() {
-  const email    = container.querySelector('#auth-email').value.trim()
-  const password = container.querySelector('#auth-password').value
-  const remember = container.querySelector('#remember-me')?.checked
-  const btn      = container.querySelector('#btn-auth')
+    const email    = container.querySelector('#auth-email').value.trim()
+    const password = container.querySelector('#auth-password').value
+    const remember = container.querySelector('#remember-me')?.checked
+    const btn      = container.querySelector('#btn-auth')
 
-  if (!email)              { showError('Please enter your email');    return }
-  if (!password)           { showError('Please enter your password'); return }
-  if (password.length < 6) { showError('Password must be at least 6 characters'); return }
-
-  btn.textContent = isSignUp ? 'Creating account...' : 'Signing in...'
-  btn.disabled    = true
-  hideError()
-
-  try {
-    // Hard 8-second timeout — prevents infinite "Signing in..."
-    const authTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Connection timed out. Check your internet and try again.')), 8000)
-    )
-
-    if (isSignUp) {
-      const { data, error } = await Promise.race([
-        supabase.auth.signUp({ email, password }),
-        authTimeout
-      ])
-      if (error) throw error
-      appStore.getState().setUser(data.user)
-      navigate('/onboarding')
-
-    } else {
-      const { data, error } = await Promise.race([
-        supabase.auth.signInWithPassword({ email, password }),
-        authTimeout
-      ])
-      if (error) throw error
-
-      if (remember) {
-        localStorage.setItem('storeos-saved-email', email)
-        localStorage.setItem('storeos-remember', 'true')
-      } else {
-        localStorage.removeItem('storeos-saved-email')
-        localStorage.setItem('storeos-remember', 'false')
-      }
-
-      appStore.getState().setUser(data.user)
-
-      const { data: owner } = await supabase
-        .from('owners').select('id').eq('email', email).maybeSingle()
-
-      if (!owner) { navigate('/onboarding'); return }
-
-      const { data: stores } = await supabase
-        .from('stores').select('*').eq('owner_id', owner.id)
-
-      if (!stores || stores.length === 0) { navigate('/onboarding'); return }
-
-      appStore.getState().setStores(stores)
-      appStore.getState().setCurrentStore(stores[0])
-      navigate('/dashboard')
+    // Validation
+    if (!email)    { showError('Please enter your email');    return }
+    if (!password) { showError('Please enter your password'); return }
+    if (password.length < 6) {
+      showError('Password must be at least 6 characters')
+      return
     }
 
-  } catch(err) {
-    showError(
-      err.message === 'Invalid login credentials'
-        ? 'Wrong email or password. Please try again.'
-        : err.message
+    btn.textContent = isSignUp ? 'Creating account...' : 'Signing in...'
+    btn.disabled    = true
+    hideError()
+
+    // Hard timeout — prevents infinite "Signing in..." hang
+    const authTimeout = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error('Connection timed out. Check your internet and try again.')),
+        8000
+      )
     )
-  } finally {
-    btn.textContent = isSignUp ? 'Create Account' : 'Sign In'
-    btn.disabled    = false
+
+    try {
+      if (isSignUp) {
+        // ── SIGN UP ──────────────────────────────────────
+        const { data, error } = await Promise.race([
+          supabase.auth.signUp({ email, password }),
+          authTimeout
+        ])
+        if (error) throw error
+
+        // New user — clear saved email, go to onboarding
+        localStorage.removeItem('storeos-saved-email')
+        appStore.getState().setUser(data.user)
+
+        // Show success message briefly before navigating
+        btn.textContent = '✓ Account created!'
+        setTimeout(() => navigate('/onboarding'), 800)
+
+      } else {
+        // ── SIGN IN ──────────────────────────────────────
+        const { data, error } = await Promise.race([
+          supabase.auth.signInWithPassword({ email, password }),
+          authTimeout
+        ])
+        if (error) throw error
+
+        // Save remember me preference
+        if (remember) {
+          localStorage.setItem('storeos-saved-email', email)
+          localStorage.setItem('storeos-remember', 'true')
+        } else {
+          localStorage.removeItem('storeos-saved-email')
+          localStorage.setItem('storeos-remember', 'false')
+        }
+
+        // Use getUser() to verify JWT integrity (more secure than getSession)
+        const { data: { user }, error: userErr } = await supabase.auth.getUser()
+        if (userErr || !user) throw new Error('Could not verify user session')
+
+        appStore.getState().setUser(user)
+
+        // Show redirecting state — onAuthStateChange in main.js handles navigation
+        btn.textContent = 'Redirecting...'
+        // Don't re-enable — page will navigate away
+        // onAuthStateChange → loadUserData → navigate('/dashboard')
+      }
+
+    } catch(err) {
+      showError(
+        err.message === 'Invalid login credentials'
+          ? 'Wrong email or password. Please try again.'
+          : err.message
+      )
+      // Re-enable button on error
+      btn.textContent = isSignUp ? 'Create Account' : 'Sign In'
+      btn.disabled    = false
+    }
   }
-}
+
+  // ── Event listeners ────────────────────────────────────
   container.querySelector('#btn-auth').addEventListener('click', handleAuth)
+
   container.querySelectorAll('#auth-email, #auth-password').forEach(input => {
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') handleAuth() })
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') handleAuth()
+    })
   })
 
-  // Auto focus — skip if email pre-filled
+  // ── Auto-focus ─────────────────────────────────────────
   setTimeout(() => {
     if (savedEmail) {
       container.querySelector('#auth-password')?.focus()
