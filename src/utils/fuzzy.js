@@ -166,28 +166,47 @@ export function extractMetaFromText(text) {
 export function parseProductLine(line) {
   if (!line) return null
   const clean = line.trim()
-  // Skip lines that are clearly not products
   if (clean.length < 2) return null
-  if (/^(total|tax|change|visa|cash|thank|www|tel|phone)/i.test(clean)) return null
+  if (/^(total|tax|change|visa|cash|thank|www|tel|phone|date)/i.test(clean)) return null
 
-  const patterns = [
-    /^(.+?)\s+x?(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*$/,
-    /^(.+?)\s+(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*$/,
-    /^(.+?)\s+(\d+(?:\.\d+)?)\s*$/,
-  ]
+  // Pattern 1: "Hisense 55 inch TV  1  99,900" — name then qty then price
+  // Handles comma-formatted numbers like 99,900
+  const p1 = clean.match(/^(.+?)\s{2,}(\d+(?:\.\d+)?)\s{2,}([\d,]+(?:\.\d+)?)\s*$/)
+  if (p1) {
+    const price = parseFloat(p1[3].replace(/,/g, ''))
+    const qty   = parseFloat(p1[2])
+    return { raw: clean, name: p1[1].trim(), quantity: qty, unitPrice: price, total: qty * price }
+  }
 
-  for (const pattern of patterns) {
-    const m = clean.match(pattern)
-    if (m) {
-      return {
-        raw:        clean,
-        name:       m[1].trim(),
-        quantity:   parseFloat(m[2]) || 1,
-        unitPrice:  m[3] ? parseFloat(m[3]) : null,
-        total:      m[3] ? parseFloat(m[2]) * parseFloat(m[3]) : null,
-      }
+  // Pattern 2: "name  qty  price" with tab separation
+  const parts = clean.split(/\t+/)
+  if (parts.length >= 3) {
+    const name  = parts[0].trim()
+    const qty   = parseFloat(parts[parts.length - 2]) || 1
+    const price = parseFloat(parts[parts.length - 1].replace(/,/g, '')) || null
+    if (name && price) return { raw: clean, name, quantity: qty, unitPrice: price, total: qty * price }
+  }
+
+  // Pattern 3: "name qty price" — numbers at end of line
+  const p3 = clean.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/)
+  if (p3) {
+    const price = parseFloat(p3[3].replace(/,/g, ''))
+    const qty   = parseFloat(p3[2])
+    // Sanity check — qty should be small, price should be large
+    if (qty <= 100 && price > qty) {
+      return { raw: clean, name: p3[1].trim(), quantity: qty, unitPrice: price, total: qty * price }
     }
   }
 
+  // Pattern 4: "name price" — just name and price, qty=1
+  const p4 = clean.match(/^(.+?)\s+([\d,]{3,}(?:\.\d+)?)\s*$/)
+  if (p4) {
+    const price = parseFloat(p4[2].replace(/,/g, ''))
+    if (price > 100) { // must be a meaningful price
+      return { raw: clean, name: p4[1].trim(), quantity: 1, unitPrice: price, total: price }
+    }
+  }
+
+  // Pattern 5: name only
   return { raw: clean, name: clean, quantity: 1, unitPrice: null, total: null }
 }

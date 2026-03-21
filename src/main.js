@@ -40,6 +40,7 @@ let contentEl    = null
 let layoutBuilt  = false
 let routerInited = false
 
+// ── Loading screen ─────────────────────────────────────────
 function showLoadingScreen() {
   app.innerHTML = `
     <div id="app-loader" style="
@@ -77,6 +78,7 @@ function showLoadingScreen() {
   `
 }
 
+// ── Mobile nav visibility ──────────────────────────────────
 function hideMobileNav() {
   const mobileNav = document.getElementById('mobile-nav')
   const fabCamera = document.getElementById('fab-camera')
@@ -92,6 +94,7 @@ function showMobileNav() {
   if (fabCamera) fabCamera.style.display = 'flex'
 }
 
+// ── Load page ──────────────────────────────────────────────
 export async function loadPage(pageName) {
   const fullScreenPages = ['auth', 'onboarding']
 
@@ -114,8 +117,6 @@ export async function loadPage(pageName) {
   }
 
   if (!document.querySelector('.sidebar')) buildLayout()
-
-  // Always show mobile nav on authenticated pages
   showMobileNav()
 
   if (contentEl && document.body.contains(contentEl)) {
@@ -142,6 +143,7 @@ export async function loadPage(pageName) {
   }
 }
 
+// ── Handle chunk load failure ──────────────────────────────
 function handleChunkError(pageName) {
   const key = `chunk-retry-${pageName}`
   if (!sessionStorage.getItem(key)) {
@@ -166,6 +168,7 @@ function handleChunkError(pageName) {
   }
 }
 
+// ── Build layout ───────────────────────────────────────────
 export function buildLayout() {
   const navExists     = document.querySelector('.sidebar')
   const contentExists = document.querySelector('.main-content')
@@ -205,6 +208,7 @@ export function buildFullScreen() {
   app.appendChild(contentEl)
 }
 
+// ── Load user data ─────────────────────────────────────────
 async function loadUserData(user) {
   try {
     const { data: owner } = await supabase
@@ -214,7 +218,6 @@ async function loadUserData(user) {
       .maybeSingle()
 
     if (!owner) {
-      // New user — clear loading screen and go to onboarding
       buildFullScreen()
       if (!routerInited) { initRouter(); routerInited = true }
       navigate('/onboarding')
@@ -245,8 +248,6 @@ async function loadUserData(user) {
     }
 
     if (!routerInited) { initRouter(); routerInited = true }
-
-    // Critical — show mobile nav after login completes
     showMobileNav()
 
   } catch(err) {
@@ -257,26 +258,29 @@ async function loadUserData(user) {
   }
 }
 
+// ── App init ───────────────────────────────────────────────
 async function init() {
   if (localStorage.getItem('storeos-mode') === 'lite') {
     document.body.classList.add('lite-mode')
   }
 
   showLoadingScreen()
-  await new Promise(r => setTimeout(r, 150))
+
+  // Hard 3-second timeout — if auth hangs, go to auth page
+  const sessionTimeout = new Promise((resolve) => {
+    setTimeout(() => resolve({ data: { session: null }, timedOut: true }), 3000)
+  })
 
   let session = null
   try {
-    const { data } = await supabase.auth.getSession()
-    session = data?.session
+    const result = await Promise.race([
+      supabase.auth.getSession(),
+      sessionTimeout
+    ])
+    session = result?.data?.session || null
   } catch(e) {
-    await new Promise(r => setTimeout(r, 600))
-    try {
-      const { data } = await supabase.auth.getSession()
-      session = data?.session
-    } catch(e2) {
-      console.warn('Auth session error:', e2.message)
-    }
+    console.warn('Auth session error:', e.message)
+    session = null
   }
 
   if (!session) {
@@ -290,6 +294,7 @@ async function init() {
   await loadUserData(session.user)
 }
 
+// ── Auth state change ──────────────────────────────────────
 supabase.auth.onAuthStateChange(async (event, session) => {
   if (event === 'SIGNED_IN' && session) {
     const currentUser = appStore.getState().user
