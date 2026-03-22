@@ -1,40 +1,226 @@
 /* ═══════════════════════════════════════════════════════════
-   STOREOS MOBILE OVERRIDES
-   Fixes all horizontal scroll, cropping, and layout issues
-   on screens ≤768px. Import this AFTER main.css.
-
-   Strategy:
-   - Tables → card-style stacked rows
-   - Multi-col grids → single column
-   - Fixed widths → 100%
-   - Overflow hidden → visible with proper wrapping
-   - All content visible without horizontal scroll
+   STOREOS MOBILE SYSTEM
+   - Nav height: 52px (down from 64px)
+   - Content padding-bottom always = nav height + safe area + extra buffer
+   - Modals: bottom sheet, never cut off
+   - All buttons always reachable
 ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Thin nav — 52px instead of 64px ── */
+  --mobile-nav-height:  52px;
+  --mobile-nav-margin:  10px;  /* margin from screen edge */
+  --mobile-nav-total:   calc(var(--mobile-nav-height) + var(--mobile-nav-margin) + var(--safe-bottom, 0px));
+
+  /* ── Content clearance — generous buffer so buttons are never hidden ── */
+  --mobile-content-bottom: calc(var(--mobile-nav-total) + 24px);
+
+  /* Safe areas */
+  --safe-top:    env(safe-area-inset-top,    0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left,   0px);
+  --safe-right:  env(safe-area-inset-right,  0px);
+}
+
+/* ── Bottom Nav Shell ─────────────────────────────────────── */
+.mobile-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  padding-bottom: var(--safe-bottom);
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
+/* ── Glass pill ───────────────────────────────────────────── */
+.mobile-nav-glass {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+
+  /* Thinner height */
+  height: var(--mobile-nav-height);
+
+  /* Glass */
+  background: rgba(255, 255, 255, 0.90);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow:
+    0 -1px 0 rgba(0,0,0,0.04),
+    0 4px 24px rgba(0,0,0,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.8);
+
+  /* Pill shape with margin */
+  border-radius: 18px;
+  margin: 0 var(--mobile-nav-margin) var(--mobile-nav-margin);
+  padding: 0 4px;
+  pointer-events: all;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Specular highlight */
+.mobile-nav-glass::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, rgba(255,255,255,1) 30%,
+    rgba(255,255,255,1) 70%, transparent
+  );
+  pointer-events: none;
+}
+
+/* ── Nav Item ─────────────────────────────────────────────── */
+.mobile-nav-item {
+  /* 44px minimum touch target */
+  min-width: 44px;
+  min-height: 44px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background  0.15s ease,
+    transform   0.15s cubic-bezier(0.34,1.56,0.64,1),
+    opacity     0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 4px 4px;
+  position: relative;
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.88);
+  opacity: 0.7;
+}
+
+.mobile-nav-item.active {
+  background: rgba(13,148,136,0.10);
+}
+
+.mobile-nav-item .m-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-400, #9CA3AF);
+  transition: color 0.15s, transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
+  flex-shrink: 0;
+}
+
+.mobile-nav-item.active .m-icon {
+  color: var(--accent, #0D9488);
+  transform: scale(1.1);
+}
+
+.mobile-nav-item .m-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--gray-400, #9CA3AF);
+  letter-spacing: 0.1px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mobile-nav-item.active .m-label {
+  color: var(--accent, #0D9488);
+}
+
+/* Active dot */
+.mobile-nav-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 3px;
+  background: var(--accent, #0D9488);
+  border-radius: 50%;
+}
+
+/* ── FAB Camera ───────────────────────────────────────────── */
+.fab-camera {
+  position: fixed;
+  /* Above the nav bar with proper spacing */
+  bottom: calc(var(--mobile-nav-total) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 201;
+  display: none;
+
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+
+  background: linear-gradient(
+    145deg,
+    rgba(255,255,255,0.95),
+    rgba(13,148,136,0.15)
+  );
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 1.5px solid rgba(255,255,255,0.85);
+  box-shadow:
+    0 6px 20px rgba(13,148,136,0.25),
+    0 2px 6px rgba(0,0,0,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.95);
+
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #0D9488);
+}
+
+.fab-camera:active {
+  transform: translateX(-50%) scale(0.88);
+}
+
+/* ══════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE RULES
+   Critical: padding-bottom on all pages = nav height + buffer
+   This is what prevents buttons from being hidden
+══════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
 
-  /* ── Base resets ──────────────────────────────────────── */
-  html, body {
-    overflow-x: hidden;
-    max-width: 100vw;
-  }
+  /* ── Show mobile nav ──────────────────────────────────── */
+  .sidebar     { display: none !important; }
+  .mobile-nav  { display: block; }
+  .fab-camera  { display: flex; }
 
-  #app {
-    overflow-x: hidden;
-    max-width: 100vw;
-  }
-
+  /* ── CRITICAL: Main content always has enough bottom padding ── */
   .main-content {
     margin-left: 0 !important;
     padding: 1rem !important;
-    padding-bottom: calc(var(--mobile-nav-total, 90px) + 2rem) !important;
+    /* This is the key — always enough room below for nav + buttons */
+    padding-bottom: var(--mobile-content-bottom) !important;
+    min-height: 100dvh;
     width: 100% !important;
     max-width: 100vw !important;
-    overflow-x: hidden !important;
     box-sizing: border-box !important;
+    overflow-x: hidden !important;
   }
 
-  /* ── Page header — stack on mobile ───────────────────── */
+  /* ── Page header ──────────────────────────────────────── */
   .page-header {
     flex-direction: column !important;
     align-items: flex-start !important;
@@ -42,44 +228,30 @@
     margin-bottom: 1rem !important;
   }
 
-  .page-header > div:last-child {
-    width: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+  .page-title {
+    font-size: 1.375rem !important;
+    letter-spacing: -0.4px !important;
   }
 
-  /* ── KPI grid — 2 columns max ─────────────────────────── */
+  /* ── KPI grid: 2 columns ──────────────────────────────── */
   .kpi-grid {
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 0.625rem !important;
   }
 
-  .kpi-value {
-    font-size: 1.25rem !important;
-    letter-spacing: -0.3px !important;
-  }
+  .kpi-value { font-size: 1.25rem !important; }
 
-  /* ── Cards — full width, no overflow ──────────────────── */
+  /* ── Cards ────────────────────────────────────────────── */
   .card {
-    width: 100% !important;
-    box-sizing: border-box !important;
-    overflow: hidden;
     border-radius: 16px !important;
     padding: 1rem !important;
+    box-sizing: border-box !important;
+    max-width: 100% !important;
   }
 
   /* ── TABLE → CARD CONVERSION ──────────────────────────── */
-  /*
-    This converts ALL tables to stacked card rows on mobile.
-    Each <tr> becomes a card. Each <td> shows its column
-    header as a label using data-label attributes.
-    No horizontal scroll. All data visible.
-  */
-
   .table-wrap {
     overflow-x: visible !important;
-    overflow: visible !important;
   }
 
   table {
@@ -88,7 +260,7 @@
   }
 
   table thead {
-    display: none !important; /* Hide header row — labels come from data-label */
+    display: none !important;
   }
 
   table tbody {
@@ -106,25 +278,22 @@
     border-radius: 12px !important;
     padding: 0.875rem !important;
     gap: 0.375rem !important;
-    box-shadow: var(--shadow-xs) !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04) !important;
   }
 
-  table tr:hover td {
-    background: transparent !important;
-  }
+  table tr:hover td { background: transparent !important; }
 
   table td {
     display: flex !important;
     justify-content: space-between !important;
     align-items: center !important;
-    padding: 0.25rem 0 !important;
+    padding: 0.2rem 0 !important;
     border-bottom: none !important;
     font-size: 0.875rem !important;
     gap: 0.5rem !important;
     flex-wrap: wrap !important;
   }
 
-  /* Show column label before value */
   table td::before {
     content: attr(data-label);
     font-size: 0.6875rem !important;
@@ -136,31 +305,23 @@
     flex-shrink: 0 !important;
   }
 
-  /* td with no data-label — full width */
-  table td:not([data-label]) {
-    justify-content: flex-start !important;
-  }
-
-  /* Remove the nth-child hide rule from main.css */
+  /* Restore hidden columns */
   table th:nth-child(n+5),
   table td:nth-child(n+5) {
     display: flex !important;
   }
 
-  /* ── Buttons — full width where needed ────────────────── */
+  /* ── Touch-friendly buttons ───────────────────────────── */
   .btn {
     min-height: 44px !important;
     touch-action: manipulation !important;
     -webkit-tap-highlight-color: transparent !important;
   }
 
-  /* Action buttons in tables — full width */
-  table td .btn {
-    min-height: 36px !important;
-    font-size: 0.8125rem !important;
-  }
+  .btn:active { opacity: 0.75; }
+  .btn-sm { min-height: 36px !important; }
 
-  /* ── Forms — full width, no zoom ──────────────────────── */
+  /* ── Inputs — prevent iOS zoom ────────────────────────── */
   .form-input,
   input[type="text"],
   input[type="number"],
@@ -169,52 +330,47 @@
   input[type="date"],
   select,
   textarea {
-    font-size: 16px !important; /* Prevents iOS zoom */
+    font-size: 16px !important;
     min-height: 44px !important;
     width: 100% !important;
     box-sizing: border-box !important;
+    touch-action: manipulation !important;
   }
 
-  /* ── Grid layouts → single column ─────────────────────── */
-  [style*="grid-template-columns"],
-  .grid-2,
-  .grid-3,
-  .grid-4 {
+  select.form-input { -webkit-appearance: none !important; }
+
+  /* ── Grids → single column ─────────────────────────────── */
+  div[style*="grid-template-columns:1fr 1fr"],
+  div[style*="grid-template-columns: 1fr 1fr"],
+  div[style*="grid-template-columns:repeat(2,1fr)"],
+  div[style*="grid-template-columns:repeat(3,1fr)"],
+  div[style*="grid-template-columns:repeat(4,1fr)"],
+  div[style*="grid-template-columns:1fr 1fr 1fr"] {
     grid-template-columns: 1fr !important;
   }
 
-  /* 2-col forms — keep 2 cols on mobile if items are small */
+  /* Keep 2-col for small form pairs */
   .form-grid-2 {
     grid-template-columns: 1fr 1fr !important;
   }
 
-  /* ── Dashboard specific ────────────────────────────────── */
-  /* Cash positions + Low stock side by side → stack */
-  #app .main-content > div > div[style*="grid-template-columns:1fr 1fr"] {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 0.75rem !important;
-  }
-
-  /* ── Tab bars — scrollable ─────────────────────────────── */
-  .tab-bar,
-  div[style*="border-bottom:2px solid var(--border)"] {
+  /* ── Tab bars — horizontally scrollable ───────────────── */
+  .tab-bar {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
     scrollbar-width: none !important;
     flex-wrap: nowrap !important;
   }
-
   .tab-bar::-webkit-scrollbar { display: none !important; }
 
   .tab-btn {
     white-space: nowrap !important;
     flex-shrink: 0 !important;
     min-height: 44px !important;
-    padding: 0 1rem !important;
   }
 
-  /* ── Modal — bottom sheet ──────────────────────────────── */
+  /* ── MODAL BOTTOM SHEETS ──────────────────────────────── */
+  /* Modals slide up from bottom — buttons always visible */
   .modal-overlay {
     align-items: flex-end !important;
     padding: 0 !important;
@@ -224,118 +380,26 @@
     border-radius: 24px 24px 0 0 !important;
     border-bottom: none !important;
     max-width: 100% !important;
+    width: 100% !important;
     max-height: 92dvh !important;
     overflow-y: auto !important;
+    /* Safe area padding at bottom of modal */
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem) !important;
-    width: 100% !important;
   }
 
-  /* ── Settings page ─────────────────────────────────────── */
-  /* Settings 2-col layout → stack */
-  div[style*="grid-template-columns:200px 1fr"] {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 0 !important;
+  /* Drag handle on modal */
+  .modal::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--gray-200, #E5E7EB);
+    border-radius: 999px;
+    margin: 0 auto 1rem;
   }
 
-  /* Settings nav → horizontal scrollable row */
-  .card[style*="padding:0.5rem"] {
-    display: flex !important;
-    flex-direction: row !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch !important;
-    scrollbar-width: none !important;
-    gap: 0.25rem !important;
-    padding: 0.5rem !important;
-    margin-bottom: 1rem !important;
-    border-radius: 12px !important;
-  }
-
-  .settings-nav-item {
-    white-space: nowrap !important;
-    flex-shrink: 0 !important;
-    min-height: 40px !important;
-    padding: 0.4rem 0.875rem !important;
-  }
-
-  /* Setting rows — stack label and control */
-  .setting-row {
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    gap: 0.75rem !important;
-  }
-
-  .setting-row > div:last-child,
-  .setting-row > select,
-  .setting-row > input {
-    width: 100% !important;
-  }
-
-  /* ── Credits page ──────────────────────────────────────── */
-  /* 3-col KPI → 2-col */
-  div[style*="grid-template-columns:repeat(3,1fr)"] {
-    grid-template-columns: repeat(2, 1fr) !important;
-  }
-
-  /* Credit box in modal */
-  .credit-box div[style*="grid-template-columns:1fr 1fr"] {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* ── Accounting page ───────────────────────────────────── */
-  /* P&L 2-col → stack */
-  div[style*="grid-template-columns:1fr 1fr"] {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* ── Filter bars — wrap ────────────────────────────────── */
-  .card div[style*="display:flex"][style*="gap:0.75rem"] {
-    flex-wrap: wrap !important;
-  }
-
-  .card .form-input[style*="max-width"] {
-    max-width: 100% !important;
-    width: 100% !important;
-  }
-
-  /* ── Search inputs in filter bars ─────────────────────── */
-  input[placeholder*="Search"],
-  input[placeholder*="search"] {
-    max-width: 100% !important;
-    width: 100% !important;
-  }
-
-  /* ── Overflow hidden containers ────────────────────────── */
-  /* Prevent any container from causing horizontal scroll */
-  .card,
-  .kpi-card,
-  .modal,
-  .pos-right,
-  section,
-  article {
-    max-width: 100% !important;
-    box-sizing: border-box !important;
-  }
-
-  /* ── Date inputs — full width ──────────────────────────── */
-  input[type="date"] {
-    max-width: 100% !important;
-    width: 100% !important;
-  }
-
-  /* ── Select dropdowns — full width ────────────────────── */
-  select {
-    max-width: 100% !important;
-    width: 100% !important;
-  }
-
-  /* ── Inline action buttons — stack ────────────────────── */
-  div[style*="display:flex;gap:0.4rem"] {
-    flex-wrap: wrap !important;
-  }
-
-  /* ── OCR modal — full bottom sheet ────────────────────── */
-  .modal-overlay > div[style*="max-width:640px"] {
+  /* Smart OCR modal — full bottom sheet */
+  .modal-overlay > div[style*="max-width"] {
     border-radius: 24px 24px 0 0 !important;
     max-width: 100% !important;
     margin: 0 !important;
@@ -344,61 +408,40 @@
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem) !important;
   }
 
-  /* OCR line items grid → stack */
-  .modal-overlay div[style*="grid-template-columns:1fr 1fr 1fr"] {
-    grid-template-columns: 1fr 1fr !important;
+  /* ── Toasts above nav ─────────────────────────────────── */
+  .toast-container {
+    bottom: calc(var(--mobile-nav-total) + 16px) !important;
+    left: 1rem !important;
+    right: 1rem !important;
   }
 
-  /* ── Inventory page ────────────────────────────────────── */
-  /* Stock movement badges — wrap */
-  div[style*="display:flex;gap:0.5rem;flex-wrap:wrap"] {
-    flex-wrap: wrap !important;
+  .toast {
+    min-width: unset !important;
     width: 100% !important;
+    justify-content: center !important;
+    border-radius: var(--radius-lg) !important;
   }
 
-  /* ── Reports page charts ───────────────────────────────── */
-  canvas {
-    max-width: 100% !important;
-    height: auto !important;
+  /* ── Mobile body background ───────────────────────────── */
+  body {
+    background:
+      linear-gradient(160deg, #E8F5F3 0%, #F0F9F8 30%, #F8FAFC 60%, #EEF2FF 100%)
+      fixed !important;
+    min-height: 100dvh;
   }
 
-  /* ── Transfer page ─────────────────────────────────────── */
-  div[style*="max-width:520px"] {
-    max-width: 100% !important;
-  }
-
-  /* ── Onboarding ────────────────────────────────────────── */
-  /* Account input grids → stack */
-  div[style*="grid-template-columns:1fr 160px auto"] {
-    grid-template-columns: 1fr 1fr !important;
-    grid-template-rows: auto auto !important;
-  }
-
-  /* Inventory rows → stack */
-  div[style*="grid-template-columns:1fr 100px 110px auto"] {
-    grid-template-columns: 1fr 1fr !important;
-    gap: 0.5rem !important;
-  }
-
-  /* ── Auth page ─────────────────────────────────────────── */
-  div[style*="max-width:400px"] {
-    max-width: 100% !important;
-    padding: 0 0.5rem !important;
-  }
-
-  /* ── POS layout on mobile ──────────────────────────────── */
+  /* ── POS layout ───────────────────────────────────────── */
   .pos-layout {
     display: flex !important;
     flex-direction: column !important;
     height: auto !important;
     max-height: none !important;
-    gap: 0 !important;
   }
 
   .pos-left {
     overflow: visible !important;
-    min-height: 0 !important;
-    padding-bottom: 100px !important;
+    /* Extra padding for POS — cart FAB sits above nav */
+    padding-bottom: calc(var(--mobile-content-bottom) + 60px) !important;
   }
 
   .pos-products {
@@ -410,53 +453,101 @@
     grid-template-columns: repeat(2, 1fr) !important;
   }
 
-  /* ── Sidebar bottom stats — hide on mobile (already hidden) */
-  .sidebar-bottom { display: none; }
-
-  /* ── Typography scaling ────────────────────────────────── */
-  .page-title {
-    font-size: 1.375rem !important;
+  /* ── Settings ─────────────────────────────────────────── */
+  div[style*="grid-template-columns:200px 1fr"] {
+    display: flex !important;
+    flex-direction: column !important;
   }
 
-  /* Large numbers in stat cards */
-  .kpi-value {
-    font-size: 1.25rem !important;
+  /* ── Transfer / narrow forms ──────────────────────────── */
+  div[style*="max-width:520px"],
+  div[style*="max-width:480px"] {
+    max-width: 100% !important;
   }
 
-  /* ── Prevent text overflow ─────────────────────────────── */
-  td, th {
-    word-break: break-word !important;
+  /* ── Auth page ────────────────────────────────────────── */
+  div[style*="max-width:400px"] {
+    max-width: 100% !important;
+    padding: 0 0.5rem !important;
   }
 
-  /* ── Scroll anchoring ──────────────────────────────────── */
-  .pos-cart-items {
-    overflow-scroll: touch !important;
-    -webkit-overflow-scrolling: touch !important;
+  /* ── Accounting / P&L side-by-side → stack ────────────── */
+  div[style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
   }
 
+  /* ── OCR line item grid (3-col) ───────────────────────── */
+  div[style*="grid-template-columns:1fr 1fr 1fr"] {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* ── Canvas charts scale ──────────────────────────────── */
+  canvas {
+    max-width: 100% !important;
+  }
+
+  /* ── Text overflow prevention ─────────────────────────── */
+  td, th { word-break: break-word !important; }
+
+  /* ── Search overlay as top sheet ─────────────────────── */
+  #search-overlay {
+    padding: 0 !important;
+    align-items: flex-start !important;
+  }
+  #search-overlay > div {
+    border-radius: 0 0 20px 20px !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    border-top: none !important;
+  }
 }
 
-/* Extra small screens (iPhone SE etc) */
+/* ── Extra small (iPhone SE, 375px) ──────────────────────── */
 @media (max-width: 375px) {
   .main-content {
     padding: 0.75rem !important;
-    padding-bottom: calc(var(--mobile-nav-total, 90px) + 2rem) !important;
+    padding-bottom: var(--mobile-content-bottom) !important;
   }
 
-  .kpi-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 0.5rem !important;
-  }
+  .kpi-grid { gap: 0.5rem !important; }
+  .kpi-value { font-size: 1.125rem !important; }
+  .pos-products.grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
 
-  .kpi-value {
-    font-size: 1.125rem !important;
-  }
+/* ── Lite mode ────────────────────────────────────────────── */
+body.lite-mode .nav-item.lite-hidden-nav { display: none; }
+body.lite-mode .lite-hidden              { display: none !important; }
+body.lite-mode .lite-only                { display: block !important; }
+.lite-only { display: none; }
 
-  .pos-products.grid {
-    grid-template-columns: repeat(2, 1fr) !important;
+/* ── Reduced motion ───────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav-item,
+  .fab-camera,
+  .btn {
+    transition: none !important;
+    animation: none !important;
   }
+}
 
-  table tr {
-    padding: 0.75rem !important;
-  }
+/* ── Skeleton ─────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--gray-100, #F3F4F6) 25%,
+    var(--gray-50,  #F9FAFB) 50%,
+    var(--gray-100, #F3F4F6) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+
+@keyframes shimmer {
+  0%   { background-position:  200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; background: var(--gray-100, #F3F4F6); }
 }
