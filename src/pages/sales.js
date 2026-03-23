@@ -30,15 +30,17 @@ export async function render(container) {
 
   container.innerHTML = `
     <div class="pos-layout">
+
       <!-- LEFT: Product browser -->
       <div class="pos-left">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;gap:0.75rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          margin-bottom:1rem;gap:0.75rem">
           <div class="page-title">Point of Sale</div>
           <div class="view-toggle">
-            <button class="view-btn ${viewMode==='grid'?'active':''}" data-view="grid" title="Grid view">
+            <button class="view-btn ${viewMode==='grid'?'active':''}" data-view="grid">
               ${renderIcon('dashboard', 15)}
             </button>
-            <button class="view-btn ${viewMode==='list'?'active':''}" data-view="list" title="List view">
+            <button class="view-btn ${viewMode==='list'?'active':''}" data-view="list">
               ${renderIcon('reports', 15)}
             </button>
           </div>
@@ -49,7 +51,8 @@ export async function render(container) {
             ${renderIcon('search', 16, 'var(--muted)')}
             <input class="pos-search-input" id="pos-search" type="text"
               placeholder="Search products..." autocomplete="off" value="${searchQuery}">
-            <button class="pos-search-clear" id="pos-search-clear" style="${searchQuery?'':'display:none'}">
+            <button class="pos-search-clear" id="pos-search-clear"
+              style="${searchQuery?'':'display:none'}">
               ${renderIcon('close', 13)}
             </button>
           </div>
@@ -59,15 +62,15 @@ export async function render(container) {
         <div id="pos-products" class="pos-products ${viewMode}"></div>
       </div>
 
-      <!-- RIGHT: Cart -->
+      <!-- RIGHT: Cart (desktop) -->
       <div class="pos-right" id="pos-cart-panel">
         <div class="pos-cart-header">
           <div style="font-weight:700;font-size:1rem;display:flex;align-items:center;gap:0.5rem">
-            ${renderIcon('store', 17)}
-            Cart
+            ${renderIcon('store', 17)} Cart
             <span class="cart-count" id="cart-badge" style="display:none">0</span>
           </div>
-          <button class="btn btn-ghost btn-sm" id="btn-clear-cart" style="color:var(--danger)">
+          <button class="btn btn-ghost btn-sm" id="btn-clear-cart"
+            style="color:var(--danger)">
             ${renderIcon('close', 14)} Clear
           </button>
         </div>
@@ -76,7 +79,9 @@ export async function render(container) {
           <div class="cart-empty">
             ${renderIcon('inventory', 32, 'var(--gray-300)')}
             <div style="margin-top:0.75rem;font-weight:500;color:var(--muted)">Cart is empty</div>
-            <div style="font-size:0.8125rem;color:var(--gray-400);margin-top:0.25rem">Add products from the left</div>
+            <div style="font-size:0.8125rem;color:var(--gray-400);margin-top:0.25rem">
+              Add products from the left
+            </div>
           </div>
         </div>
 
@@ -88,9 +93,12 @@ export async function render(container) {
           <div class="total-row">
             <span class="total-label">
               Discount
-              <input type="number" id="discount-input" class="inline-input" min="0" max="100" value="0"> %
+              <input type="number" id="discount-input" class="inline-input"
+                min="0" max="100" value="0"> %
             </span>
-            <span class="total-val" id="tot-discount" style="color:var(--danger)">-0.00 ETB</span>
+            <span class="total-val" id="tot-discount" style="color:var(--danger)">
+              -0.00 ETB
+            </span>
           </div>
           <div class="total-divider"></div>
           <div class="total-row total-final">
@@ -105,13 +113,11 @@ export async function render(container) {
             <div class="form-label" style="margin-bottom:0.4rem">Payment</div>
             <div class="pay-methods" id="pay-methods">
               ${['cash','bank_transfer','telebirr','cbe_birr','credit','other'].map(pm => `
-                <button class="pay-method-btn ${pm==='cash'?'active':''}" data-pay="${pm}">
-                  ${PAY_LABELS[pm]}
-                </button>
+                <button class="pay-method-btn ${pm==='cash'?'active':''}"
+                  data-pay="${pm}">${PAY_LABELS[pm]}</button>
               `).join('')}
             </div>
           </div>
-
           <div id="credit-fields" style="display:none;margin-bottom:0.75rem">
             <div class="credit-banner">
               ${renderIcon('user', 14)} Customer required for credit sale
@@ -119,9 +125,10 @@ export async function render(container) {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
               <div>
                 <label class="form-label">Name *</label>
-                <input class="form-input" id="credit-name" placeholder="Customer name" list="cust-list">
+                <input class="form-input" id="credit-name" placeholder="Customer name"
+                  list="cust-list">
                 <datalist id="cust-list">
-                  ${customers.map(c => `<option value="${c.name}">`).join('')}
+                  ${customers.map(c=>`<option value="${c.name}">`).join('')}
                 </datalist>
               </div>
               <div>
@@ -130,16 +137,16 @@ export async function render(container) {
               </div>
             </div>
           </div>
-
           <div id="optional-customer" style="margin-bottom:0.75rem">
             <details>
               <summary class="optional-summary">+ Customer info (optional)</summary>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
                 <div>
                   <label class="form-label">Name</label>
-                  <input class="form-input" id="opt-cust-name" placeholder="Optional" list="cust-list-2">
+                  <input class="form-input" id="opt-cust-name" placeholder="Optional"
+                    list="cust-list-2">
                   <datalist id="cust-list-2">
-                    ${customers.map(c => `<option value="${c.name}">`).join('')}
+                    ${customers.map(c=>`<option value="${c.name}">`).join('')}
                   </datalist>
                 </div>
                 <div>
@@ -149,101 +156,299 @@ export async function render(container) {
               </div>
             </details>
           </div>
-
           <div style="margin-bottom:0.75rem">
             <label class="form-label">Cash Account</label>
             <select class="form-input" id="sale-account">
-              ${accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+              ${accounts.map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}
             </select>
           </div>
-
           <div style="margin-bottom:0.875rem">
             <label class="form-label">Note (optional)</label>
-            <input class="form-input" id="sale-note" placeholder="e.g. delivery, invoice ref...">
+            <input class="form-input" id="sale-note"
+              placeholder="e.g. delivery, invoice ref...">
           </div>
-
           <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.875rem">
-            <input type="checkbox" id="bulk-toggle" style="width:16px;height:16px;accent-color:var(--accent)">
-            <label for="bulk-toggle" style="font-size:0.875rem;font-weight:500;cursor:pointer">
+            <input type="checkbox" id="bulk-toggle"
+              style="width:16px;height:16px;accent-color:var(--accent)">
+            <label for="bulk-toggle"
+              style="font-size:0.875rem;font-weight:500;cursor:pointer">
               Bulk sale — skip stock deduction
             </label>
           </div>
-
           <button class="btn btn-primary btn-sell" id="btn-sell">
             ${renderIcon('check', 18)} Complete Sale
           </button>
         </div>
       </div>
     </div>
+
+    <!-- ── MOBILE CART SHEET ──────────────────────────────── -->
+    <!-- Trigger button — sticky above nav -->
+    <div id="mobile-cart-trigger" style="display:none">
+      <button id="btn-open-cart" aria-label="Open cart">
+        <div style="position:relative">
+          ${renderIcon('store', 22, '#fff')}
+          <span id="mobile-cart-count" style="
+            position:absolute;top:-8px;right:-10px;
+            background:#fff;color:var(--accent);
+            font-size:11px;font-weight:800;
+            border-radius:999px;
+            padding:1px 5px;min-width:18px;
+            text-align:center;line-height:1.4;
+            display:none;
+          ">0</span>
+        </div>
+        <span id="mobile-cart-total" style="font-weight:700;font-size:0.9375rem">
+          0.00 ETB
+        </span>
+        <div style="
+          display:flex;align-items:center;gap:4px;
+          background:rgba(255,255,255,0.2);
+          border-radius:var(--radius-pill);
+          padding:4px 10px;font-size:0.8125rem;font-weight:600;
+        ">
+          Checkout ${renderIcon('check', 13, '#fff')}
+        </div>
+      </button>
+    </div>
+
+    <!-- Mobile cart bottom sheet overlay -->
+    <div id="mobile-cart-overlay" style="
+      display:none;position:fixed;inset:0;
+      background:rgba(0,0,0,0.4);
+      backdrop-filter:blur(4px);
+      z-index:240;
+    "></div>
+
+    <!-- Mobile cart sheet -->
+    <div id="mobile-cart-sheet" style="
+      display:none;
+      position:fixed;bottom:0;left:0;right:0;
+      z-index:250;
+      background:var(--bg-elevated);
+      border-radius:24px 24px 0 0;
+      max-height:92dvh;
+      overflow-y:auto;
+      transform:translateY(100%);
+      transition:transform 0.35s cubic-bezier(0.32,0.72,0,1);
+      padding-bottom:calc(env(safe-area-inset-bottom,0px) + 1rem);
+    ">
+      <!-- Drag handle -->
+      <div style="padding:12px 0 0;text-align:center;flex-shrink:0">
+        <div style="width:36px;height:4px;background:var(--gray-200);
+          border-radius:999px;display:inline-block;"></div>
+      </div>
+
+      <!-- Sheet header -->
+      <div style="
+        display:flex;align-items:center;justify-content:space-between;
+        padding:12px 20px 16px;
+        border-bottom:1px solid var(--border);
+      ">
+        <div style="font-weight:700;font-size:1.125rem;
+          display:flex;align-items:center;gap:0.5rem;">
+          ${renderIcon('store', 20)} Cart
+          <span id="sheet-badge" style="
+            background:var(--accent);color:#fff;
+            font-size:0.75rem;font-weight:700;
+            border-radius:999px;padding:1px 7px;
+            display:none;
+          ">0</span>
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <button class="btn btn-ghost btn-sm" id="sheet-clear"
+            style="color:var(--danger)">
+            ${renderIcon('close', 13)} Clear
+          </button>
+          <button id="btn-close-cart" style="
+            width:32px;height:32px;border-radius:50%;
+            background:var(--bg-subtle);
+            display:flex;align-items:center;justify-content:center;
+            color:var(--muted);border:none;cursor:pointer;
+          ">${renderIcon('close', 15)}</button>
+        </div>
+      </div>
+
+      <!-- Cart items -->
+      <div id="sheet-items" style="padding:12px 16px;"></div>
+
+      <!-- Totals + checkout inside sheet -->
+      <div id="sheet-checkout" style="
+        padding:0 16px 16px;
+        display:none;
+      ">
+        <!-- Subtotal / discount -->
+        <div style="
+          background:var(--bg-subtle);border-radius:14px;
+          padding:12px 14px;margin-bottom:12px;
+        ">
+          <div style="display:flex;justify-content:space-between;
+            font-size:0.875rem;color:var(--muted);margin-bottom:6px;">
+            <span>Subtotal</span>
+            <span id="sheet-subtotal" style="font-weight:600;color:var(--dark)">
+              0.00 ETB
+            </span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            font-size:0.875rem;color:var(--muted);">
+            <span style="display:flex;align-items:center;gap:6px">
+              Discount
+              <input type="number" id="sheet-discount"
+                class="inline-input" min="0" max="100" value="0"> %
+            </span>
+            <span id="sheet-discount-amt" style="font-weight:600;color:var(--danger)">
+              -0.00 ETB
+            </span>
+          </div>
+          <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+          <div style="display:flex;justify-content:space-between;
+            font-size:1.0625rem;font-weight:800;">
+            <span>Total</span>
+            <span id="sheet-total" style="color:var(--accent);letter-spacing:-0.3px">
+              0.00 ETB
+            </span>
+          </div>
+          <div id="sheet-profit-bar" style="margin-top:8px"></div>
+        </div>
+
+        <!-- Payment method -->
+        <div style="margin-bottom:12px">
+          <div class="form-label" style="margin-bottom:6px">Payment</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap" id="sheet-pay-methods">
+            ${['cash','bank_transfer','telebirr','cbe_birr','credit','other'].map(pm => `
+              <button class="sheet-pay-btn ${pm==='cash'?'active':''}" data-pay="${pm}"
+                style="
+                  padding:6px 12px;border-radius:var(--radius-pill);
+                  font-size:0.8125rem;font-weight:600;cursor:pointer;
+                  border:1.5px solid ${pm==='cash'?'var(--accent)':'var(--border)'};
+                  background:${pm==='cash'?'var(--teal-50)':'var(--bg-elevated)'};
+                  color:${pm==='cash'?'var(--accent)':'var(--muted)'};
+                  min-height:36px;
+                  -webkit-tap-highlight-color:transparent;
+                ">${PAY_LABELS[pm]}</button>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Credit fields -->
+        <div id="sheet-credit-fields" style="display:none;margin-bottom:12px">
+          <div class="credit-banner" style="margin-bottom:8px">
+            ${renderIcon('user', 14)} Customer required
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label class="form-label">Name *</label>
+              <input class="form-input" id="sheet-credit-name"
+                placeholder="Customer name" list="sheet-cust-list">
+              <datalist id="sheet-cust-list">
+                ${customers.map(c=>`<option value="${c.name}">`).join('')}
+              </datalist>
+            </div>
+            <div>
+              <label class="form-label">Phone</label>
+              <input class="form-input" id="sheet-credit-phone"
+                placeholder="09xxxxxxxx">
+            </div>
+          </div>
+        </div>
+
+        <!-- Cash account -->
+        <div style="margin-bottom:12px">
+          <label class="form-label">Cash Account</label>
+          <select class="form-input" id="sheet-account">
+            ${accounts.map(a=>`<option value="${a.id}">${a.name}</option>`).join('')}
+          </select>
+        </div>
+
+        <!-- Note -->
+        <div style="margin-bottom:12px">
+          <label class="form-label">Note (optional)</label>
+          <input class="form-input" id="sheet-note"
+            placeholder="e.g. delivery, invoice ref...">
+        </div>
+
+        <!-- Bulk toggle -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <input type="checkbox" id="sheet-bulk"
+            style="width:16px;height:16px;accent-color:var(--accent)">
+          <label for="sheet-bulk"
+            style="font-size:0.875rem;font-weight:500;cursor:pointer">
+            Bulk sale — skip stock deduction
+          </label>
+        </div>
+
+        <!-- Complete sale button -->
+        <button id="sheet-sell" class="btn btn-primary"
+          style="width:100%;justify-content:center;font-size:1rem;
+            min-height:52px;border-radius:16px;gap:0.5rem;">
+          ${renderIcon('check', 20)} Complete Sale
+        </button>
+      </div>
+    </div>
   `
 
   injectPOSStyles()
 
-  // ── Mobile cart FAB ───────────────────────────────────────
-  const cartFab = document.createElement('button')
-  cartFab.id = 'cart-fab'
-  cartFab.style.cssText = `
-    display:none;position:fixed;bottom:90px;right:1rem;z-index:200;
-    width:54px;height:54px;border-radius:50%;background:var(--accent);
-    color:#fff;border:none;cursor:pointer;
-    align-items:center;justify-content:center;
-    box-shadow:0 4px 16px rgba(13,148,136,0.35);
-    transition:transform 0.2s cubic-bezier(0.34,1.56,0.64,1);
-  `
-  cartFab.innerHTML = `
-    <div style="position:relative;display:flex;align-items:center;justify-content:center">
-      ${renderIcon('store', 22, '#fff')}
-      <span id="fab-badge" style="
-        position:absolute;top:-8px;right:-8px;
-        background:#fff;color:var(--accent);
-        font-size:10px;font-weight:800;
-        border-radius:999px;padding:1px 5px;
-        display:none;min-width:16px;text-align:center;
-      ">0</span>
-    </div>
-  `
-  document.body.appendChild(cartFab)
+  let activeCategory = ''
+  let paymentMethod  = 'cash'
+  let sheetPayMethod = 'cash'
+  let discount       = 0
+  let sheetDiscount  = 0
+  let cartOpen       = false
 
-  if (window.innerWidth <= 768) cartFab.style.display = 'flex'
-  window.addEventListener('resize', () => {
-    cartFab.style.display = window.innerWidth <= 768 ? 'flex' : 'none'
-  })
+  // ── Mobile cart sheet visibility ──────────────────────
+  const trigger       = container.querySelector('#mobile-cart-trigger')
+  const cartSheet     = document.getElementById('mobile-cart-sheet') ||
+                        container.querySelector('#mobile-cart-sheet')
+  const cartOverlay   = container.querySelector('#mobile-cart-overlay')
 
-  const cartPanel = container.querySelector('#pos-cart-panel')
-  let cartOpen = false
+  function isMobile() { return window.innerWidth <= 768 }
 
-  function toggleCart(open) {
-    cartOpen = open
-    cartPanel.classList.toggle('open', open)
-    cartFab.style.transform = open ? 'scale(0.9)' : 'scale(1)'
-    document.body.style.overflow = open ? 'hidden' : ''
+  function openCartSheet() {
+    if (!isMobile()) return
+    cartOpen = true
+    const sheet   = document.getElementById('mobile-cart-sheet')
+    const overlay = container.querySelector('#mobile-cart-overlay')
+    if (sheet)   { sheet.style.display   = 'block'; requestAnimationFrame(() => { sheet.style.transform = 'translateY(0)' }) }
+    if (overlay) { overlay.style.display = 'block' }
+    document.body.style.overflow = 'hidden'
   }
 
-  cartFab.addEventListener('click', () => toggleCart(!cartOpen))
-  container.querySelector('.pos-cart-header').addEventListener('click', () => {
-    if (window.innerWidth <= 768 && cartOpen) toggleCart(false)
-  })
-  cartPanel.addEventListener('click', e => {
-    if (e.target === cartPanel && window.innerWidth <= 768) toggleCart(false)
-  })
-
-  container._cleanup = () => {
-    cartFab.remove()
+  function closeCartSheet() {
+    cartOpen = false
+    const sheet   = document.getElementById('mobile-cart-sheet')
+    const overlay = container.querySelector('#mobile-cart-overlay')
+    if (sheet) {
+      sheet.style.transform = 'translateY(100%)'
+      setTimeout(() => { if (sheet) sheet.style.display = 'none' }, 350)
+    }
+    if (overlay) overlay.style.display = 'none'
     document.body.style.overflow = ''
   }
 
-  let activeCategory = ''
-  let paymentMethod  = 'cash'
-  let discount       = 0
+  container.querySelector('#btn-open-cart')?.addEventListener('click', openCartSheet)
+  container.querySelector('#btn-close-cart')?.addEventListener('click', closeCartSheet)
+  container.querySelector('#mobile-cart-overlay')?.addEventListener('click', closeCartSheet)
 
-  // ── Categories ────────────────────────────────────────────
+  window.addEventListener('resize', () => {
+    if (!isMobile()) closeCartSheet()
+    updateTrigger()
+  })
+
+  container._cleanup = () => {
+    document.body.style.overflow = ''
+  }
+
+  // ── Categories ─────────────────────────────────────────
   function renderCategories() {
     const cats = [...new Set(allItems.map(i => i.category).filter(Boolean))].sort()
     const el   = container.querySelector('#pos-categories')
     el.innerHTML = `
       <button class="cat-chip ${!activeCategory?'active':''}" data-cat="">All</button>
       ${cats.map(c => `
-        <button class="cat-chip ${activeCategory===c?'active':''}" data-cat="${c}">${c}</button>
+        <button class="cat-chip ${activeCategory===c?'active':''}" data-cat="${c}">
+          ${c}
+        </button>
       `).join('')}
     `
     el.querySelectorAll('.cat-chip').forEach(btn => {
@@ -255,14 +460,10 @@ export async function render(container) {
     })
   }
 
-  // ── Products ──────────────────────────────────────────────
+  // ── Products ────────────────────────────────────────────
   function getItemPrice(item) {
-    // Priority: selling_price → unit_cost → 0
-    return Number(item.selling_price) > 0
-      ? Number(item.selling_price)
-      : Number(item.unit_cost) > 0
-        ? Number(item.unit_cost)
-        : 0
+    return Number(item.selling_price) > 0 ? Number(item.selling_price) :
+           Number(item.unit_cost)     > 0 ? Number(item.unit_cost)     : 0
   }
 
   function renderProducts() {
@@ -283,7 +484,7 @@ export async function render(container) {
         <div class="products-empty">
           ${renderIcon('inventory', 32, 'var(--gray-300)')}
           <div style="margin-top:0.75rem;color:var(--muted);font-size:0.875rem">
-            ${searchQuery ? `No products matching "${searchQuery}"` : 'No products yet'}
+            ${searchQuery ? `No results for "${searchQuery}"` : 'No products yet'}
           </div>
         </div>
       `
@@ -296,7 +497,8 @@ export async function render(container) {
         const outOfStock = Number(item.quantity) <= 0
         const price      = getItemPrice(item)
         return `
-          <div class="product-card ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}" data-id="${item.id}">
+          <div class="product-card ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}"
+            data-id="${item.id}">
             <div class="product-card-inner">
               <div class="product-icon-wrap">
                 ${renderIcon('inventory', 20, inCart ? 'var(--accent)' : 'var(--gray-400)')}
@@ -304,14 +506,14 @@ export async function render(container) {
               <div class="product-name">${highlight(item.item_name, searchQuery)}</div>
               <div class="product-cat">${item.category || ''}</div>
               <div class="product-price">
-                ${price > 0 ? fmt(price) + ' ETB' : 'No price set'}
+                ${price > 0 ? fmt(price) + ' ETB' : 'No price'}
               </div>
               <div class="product-stock ${outOfStock?'out':'ok'}">
                 ${outOfStock ? 'Out of stock' : item.quantity + ' in stock'}
               </div>
             </div>
             <button class="product-add-btn ${inCart?'added':''}" data-id="${item.id}">
-              ${inCart ? renderIcon('check', 14, 'var(--accent)') : renderIcon('plus', 14, '#fff')}
+              ${inCart ? renderIcon('check',14,'var(--accent)') : renderIcon('plus',14,'#fff')}
             </button>
           </div>
         `
@@ -324,7 +526,8 @@ export async function render(container) {
             const outOfStock = Number(item.quantity) <= 0
             const price      = getItemPrice(item)
             return `
-              <div class="product-row ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}" data-id="${item.id}">
+              <div class="product-row ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}"
+                data-id="${item.id}">
                 <div class="product-row-check">
                   <div class="product-row-dot ${inCart?'active':''}"></div>
                 </div>
@@ -332,7 +535,6 @@ export async function render(container) {
                   <div class="product-row-name">${highlight(item.item_name, searchQuery)}</div>
                   <div class="product-row-meta">
                     ${item.category ? `<span>${item.category}</span>` : ''}
-                    ${item.sku      ? `<span>SKU: ${item.sku}</span>` : ''}
                     <span class="${outOfStock?'out-of-stock-text':'in-stock-text'}">
                       ${outOfStock ? 'Out of stock' : item.quantity + ' in stock'}
                     </span>
@@ -342,7 +544,7 @@ export async function render(container) {
                   ${price > 0 ? fmt(price) + ' ETB' : '—'}
                 </div>
                 <button class="product-row-add ${inCart?'added':''}" data-id="${item.id}">
-                  ${inCart ? renderIcon('check', 14, 'var(--accent)') : renderIcon('plus', 14, '#fff')}
+                  ${inCart ? renderIcon('check',14,'var(--accent)') : renderIcon('plus',14,'#fff')}
                 </button>
               </div>
             `
@@ -368,7 +570,7 @@ export async function render(container) {
     })
   }
 
-  // ── Cart operations ───────────────────────────────────────
+  // ── Cart operations ─────────────────────────────────────
   function addToCart(item) {
     const existing  = cart.find(c => c.item.id === item.id)
     const unitPrice = getItemPrice(item)
@@ -378,8 +580,14 @@ export async function render(container) {
     } else {
       cart.push({ item, qty: 1, price: unitPrice })
     }
+
     renderCart()
     renderProducts()
+
+    // On mobile auto-open sheet on first item
+    if (isMobile() && cart.length === 1) {
+      setTimeout(() => openCartSheet(), 300)
+    }
   }
 
   function removeFromCart(itemId) {
@@ -388,48 +596,43 @@ export async function render(container) {
     renderProducts()
   }
 
-  // ── Render cart — NO re-render on input change ────────────
-  // KEY FIX: inputs use event delegation, not re-render on every keystroke
+  // ── Render cart — desktop + mobile sheet ────────────────
   function renderCart() {
+    renderDesktopCart()
+    renderMobileSheet()
+    updateTrigger()
+  }
+
+  function renderDesktopCart() {
+    if (isMobile()) return
+
     const itemsEl    = container.querySelector('#cart-items')
     const totalsEl   = container.querySelector('#pos-totals')
     const checkoutEl = container.querySelector('#pos-checkout')
     const badge      = container.querySelector('#cart-badge')
-    const fabBadge   = document.getElementById('fab-badge')
-    const fab        = document.getElementById('cart-fab')
 
-    if (cart.length === 0) {
+    if (!cart.length) {
       itemsEl.innerHTML = `
         <div class="cart-empty">
           ${renderIcon('inventory', 32, 'var(--gray-300)')}
           <div style="margin-top:0.75rem;font-weight:500;color:var(--muted)">Cart is empty</div>
-          <div style="font-size:0.8125rem;color:var(--gray-400);margin-top:0.25rem">Add products from the left</div>
+          <div style="font-size:0.8125rem;color:var(--gray-400);margin-top:0.25rem">
+            Add products from the left
+          </div>
         </div>
       `
       totalsEl.style.display   = 'none'
       checkoutEl.style.display = 'none'
       badge.style.display      = 'none'
-      if (fabBadge) fabBadge.style.display = 'none'
       return
     }
 
     badge.style.display = 'inline-flex'
     badge.textContent   = cart.length
-    if (fabBadge) { fabBadge.style.display = 'inline-block'; fabBadge.textContent = cart.length }
-    if (fab && cart.length > 0) {
-      fab.style.transform = 'scale(1.2)'
-      setTimeout(() => { fab.style.transform = 'scale(1)' }, 200)
-    }
-    if (cart.length === 1 && window.innerWidth <= 768 && !cartOpen) {
-      setTimeout(() => toggleCart(true), 300)
-    }
 
-    // Build cart HTML — inputs keep their values, NO re-render triggers
     itemsEl.innerHTML = cart.map(entry => {
       const cost   = Number(entry.item.unit_cost) || 0
       const isLoss = entry.price > 0 && cost > 0 && entry.price < cost
-      const lineTotal = entry.qty * entry.price
-
       return `
         <div class="cart-item" data-cart-id="${entry.item.id}">
           <div class="cart-item-top">
@@ -438,43 +641,27 @@ export async function render(container) {
               ${renderIcon('close', 13)}
             </button>
           </div>
-
           <div class="cart-item-controls">
             <div class="qty-control">
               <button class="qty-btn" data-qty-dec="${entry.item.id}">−</button>
-              <input
-                type="number"
-                class="qty-input"
-                value="${entry.qty}"
-                min="0.01"
-                step="0.01"
-                data-qty-input="${entry.item.id}"
-                inputmode="decimal"
-              >
+              <input type="number" class="qty-input" value="${entry.qty}"
+                min="0.01" step="0.01" data-qty-input="${entry.item.id}"
+                inputmode="decimal">
               <button class="qty-btn" data-qty-inc="${entry.item.id}">+</button>
             </div>
-
             <div class="price-input-wrap">
               <span class="price-prefix">ETB</span>
-              <input
-                type="number"
-                class="price-input ${isLoss?'price-loss':''}"
-                value="${entry.price}"
-                min="0"
-                step="0.01"
-                data-price-input="${entry.item.id}"
-                inputmode="decimal"
-              >
+              <input type="number" class="price-input ${isLoss?'price-loss':''}"
+                value="${entry.price}" min="0" step="0.01"
+                data-price-input="${entry.item.id}" inputmode="decimal">
             </div>
-
             <div class="cart-line-total" data-total-id="${entry.item.id}">
-              ${fmt(lineTotal)} ETB
+              ${fmt(entry.qty * entry.price)} ETB
             </div>
           </div>
-
           ${isLoss ? `
             <div class="loss-warning">
-              ${renderIcon('alert', 12)} Below cost (${fmt(cost)} ETB)
+              ${renderIcon('alert',12)} Below cost (${fmt(cost)} ETB)
             </div>
           ` : ''}
         </div>
@@ -484,131 +671,363 @@ export async function render(container) {
     totalsEl.style.display   = 'block'
     checkoutEl.style.display = 'block'
 
-    attachCartListeners()
-    updateTotals()
+    attachDesktopCartListeners()
+    updateDesktopTotals()
   }
 
-  // ── Cart listeners — event delegation approach ────────────
-  // CRITICAL FIX: we use 'change' not 'input' for qty to avoid re-render
-  // For price we update in-place without re-rendering the whole cart
-  function attachCartListeners() {
-    // Remove button
+  function attachDesktopCartListeners() {
     container.querySelectorAll('[data-remove]').forEach(btn => {
       btn.addEventListener('click', () => removeFromCart(btn.dataset.remove))
     })
-
-    // Qty decrement
     container.querySelectorAll('[data-qty-dec]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const id    = btn.dataset.qtyDec
-        const entry = cart.find(c => c.item.id === id)
+        const entry = cart.find(c => c.item.id === btn.dataset.qtyDec)
         if (!entry) return
         entry.qty = Math.max(0.01, Math.round((entry.qty - 1) * 100) / 100)
-        // Update input value in-place
-        const input = container.querySelector(`[data-qty-input="${id}"]`)
-        if (input) input.value = entry.qty
-        updateLineTotal(id)
-        updateTotals()
-        // Only re-render if going below 1 to show warning or remove
-        if (entry.qty <= 0) removeFromCart(id)
+        const inp = container.querySelector(`[data-qty-input="${entry.item.id}"]`)
+        if (inp) inp.value = entry.qty
+        updateLineTotal(entry.item.id)
+        updateDesktopTotals()
       })
     })
-
-    // Qty increment
     container.querySelectorAll('[data-qty-inc]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const id    = btn.dataset.qtyInc
-        const entry = cart.find(c => c.item.id === id)
+        const entry = cart.find(c => c.item.id === btn.dataset.qtyInc)
         if (!entry) return
         entry.qty = Math.round((entry.qty + 1) * 100) / 100
-        const input = container.querySelector(`[data-qty-input="${id}"]`)
-        if (input) input.value = entry.qty
-        updateLineTotal(id)
-        updateTotals()
+        const inp = container.querySelector(`[data-qty-input="${entry.item.id}"]`)
+        if (inp) inp.value = entry.qty
+        updateLineTotal(entry.item.id)
+        updateDesktopTotals()
       })
     })
-
-    // Qty manual input — only update on blur/enter, NOT on every keystroke
-    container.querySelectorAll('[data-qty-input]').forEach(input => {
-      // Remove any existing listeners by cloning
-      const newInput = input.cloneNode(true)
-      input.parentNode.replaceChild(newInput, input)
-
-      newInput.addEventListener('change', () => {
-        const id    = newInput.dataset.qtyInput
-        const entry = cart.find(c => c.item.id === id)
+    container.querySelectorAll('[data-qty-input]').forEach(inp => {
+      const n = inp.cloneNode(true); inp.parentNode.replaceChild(n, inp)
+      n.addEventListener('change', () => {
+        const entry = cart.find(c => c.item.id === n.dataset.qtyInput)
         if (!entry) return
-        entry.qty = Math.max(0.01, parseFloat(newInput.value) || 1)
-        newInput.value = entry.qty
-        updateLineTotal(id)
-        updateTotals()
+        entry.qty = Math.max(0.01, parseFloat(n.value) || 1)
+        n.value = entry.qty
+        updateLineTotal(entry.item.id)
+        updateDesktopTotals()
       })
     })
-
-    // Price input — update in-place WITHOUT re-rendering cart
-    // This is the keyboard disappear fix — we never re-render on price change
-    container.querySelectorAll('[data-price-input]').forEach(input => {
-      const newInput = input.cloneNode(true)
-      input.parentNode.replaceChild(newInput, input)
-
-      newInput.addEventListener('input', () => {
-        const id    = newInput.dataset.priceInput
-        const entry = cart.find(c => c.item.id === id)
+    container.querySelectorAll('[data-price-input]').forEach(inp => {
+      const n = inp.cloneNode(true); inp.parentNode.replaceChild(n, inp)
+      n.addEventListener('input', () => {
+        const entry = cart.find(c => c.item.id === n.dataset.priceInput)
         if (!entry) return
-        entry.price = parseFloat(newInput.value) || 0
-        updateLineTotal(id)
-        updateTotals()
-        // Update loss warning class without re-rendering
+        entry.price = parseFloat(n.value) || 0
+        updateLineTotal(entry.item.id)
+        updateDesktopTotals()
         const cost   = Number(entry.item.unit_cost) || 0
-        const isLoss = entry.price > 0 && cost > 0 && entry.price < cost
-        newInput.classList.toggle('price-loss', isLoss)
+        n.classList.toggle('price-loss', entry.price > 0 && cost > 0 && entry.price < cost)
       })
     })
   }
 
-  // Update a single line total in-place — no re-render
   function updateLineTotal(itemId) {
     const entry   = cart.find(c => c.item.id === itemId)
     if (!entry) return
-    const total   = entry.qty * entry.price
     const totalEl = container.querySelector(`[data-total-id="${itemId}"]`)
-    if (totalEl) totalEl.textContent = fmt(total) + ' ETB'
+    if (totalEl) totalEl.textContent = fmt(entry.qty * entry.price) + ' ETB'
   }
 
-  function updateTotals() {
+  function updateDesktopTotals() {
     const subtotal  = cart.reduce((s, e) => s + e.qty * e.price, 0)
     const discAmt   = subtotal * (discount / 100)
     const total     = subtotal - discAmt
-    const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost) || 0), 0)
+    const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost)||0), 0)
     const profit    = total - totalCost
-    const margin    = total > 0 ? (profit / total * 100) : 0
+    const margin    = total > 0 ? profit/total*100 : 0
 
     const set = (id, val) => { const el = container.querySelector(id); if (el) el.textContent = val }
     set('#tot-subtotal', fmt(subtotal) + ' ETB')
     set('#tot-discount', '-' + fmt(discAmt) + ' ETB')
     set('#tot-final',    fmt(total) + ' ETB')
 
-    const profitBar = container.querySelector('#profit-bar')
-    if (!profitBar) return
-    if (profit < 0) {
-      profitBar.className = 'profit-bar loss'
-      profitBar.innerHTML = `${renderIcon('alert', 13)} Net loss of ${fmt(Math.abs(profit))} ETB`
-    } else if (margin < 10) {
-      profitBar.className = 'profit-bar low'
-      profitBar.innerHTML = `${renderIcon('alert', 13)} Low margin — ${margin.toFixed(1)}% profit`
-    } else {
-      profitBar.className = 'profit-bar ok'
-      profitBar.innerHTML = `${renderIcon('check', 13)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB profit`
+    const pb = container.querySelector('#profit-bar')
+    if (pb) {
+      if (profit < 0) {
+        pb.className = 'profit-bar loss'
+        pb.innerHTML = `${renderIcon('alert',13)} Net loss of ${fmt(Math.abs(profit))} ETB`
+      } else if (margin < 10) {
+        pb.className = 'profit-bar low'
+        pb.innerHTML = `${renderIcon('alert',13)} Low margin — ${margin.toFixed(1)}%`
+      } else {
+        pb.className = 'profit-bar ok'
+        pb.innerHTML = `${renderIcon('check',13)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB`
+      }
     }
   }
 
-  // ── Search ────────────────────────────────────────────────
+  // ── Mobile sheet render ──────────────────────────────────
+  function renderMobileSheet() {
+    const sheetItems    = document.getElementById('sheet-items')
+    const sheetCheckout = document.getElementById('sheet-checkout')
+    const sheetBadge    = document.getElementById('sheet-badge')
+
+    if (!sheetItems) return
+
+    if (!cart.length) {
+      sheetItems.innerHTML = `
+        <div style="text-align:center;padding:2rem 1rem;color:var(--muted)">
+          <div style="margin-bottom:0.75rem">${renderIcon('inventory', 32, 'var(--gray-300)')}</div>
+          <div style="font-weight:500">Cart is empty</div>
+          <div style="font-size:0.8125rem;margin-top:0.25rem;color:var(--gray-400)">
+            Tap products to add them
+          </div>
+        </div>
+      `
+      if (sheetCheckout) sheetCheckout.style.display = 'none'
+      if (sheetBadge)    sheetBadge.style.display    = 'none'
+      return
+    }
+
+    if (sheetBadge) {
+      sheetBadge.style.display = 'inline-flex'
+      sheetBadge.textContent   = cart.length
+    }
+
+    sheetItems.innerHTML = cart.map(entry => {
+      const cost   = Number(entry.item.unit_cost) || 0
+      const isLoss = entry.price > 0 && cost > 0 && entry.price < cost
+      const total  = entry.qty * entry.price
+
+      return `
+        <div style="
+          display:flex;flex-direction:column;
+          padding:12px;margin-bottom:8px;
+          background:var(--bg-subtle);
+          border:1px solid var(--border);
+          border-radius:14px;
+        " data-sheet-item="${entry.item.id}">
+          <!-- Name + remove -->
+          <div style="display:flex;align-items:center;
+            justify-content:space-between;margin-bottom:10px">
+            <div style="font-weight:600;font-size:0.9375rem;flex:1;
+              min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              ${entry.item.item_name}
+            </div>
+            <button data-sheet-remove="${entry.item.id}" style="
+              width:28px;height:28px;border-radius:50%;
+              background:var(--red-50);
+              display:flex;align-items:center;justify-content:center;
+              color:var(--danger);border:none;cursor:pointer;
+              flex-shrink:0;margin-left:8px;
+            ">${renderIcon('close', 12, 'var(--danger)')}</button>
+          </div>
+
+          <!-- Qty + Price + Total in a row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            <!-- Qty -->
+            <div style="display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+                text-transform:uppercase;letter-spacing:0.5px">QTY</div>
+              <div style="display:flex;align-items:center;
+                background:var(--bg-elevated);border:1px solid var(--border);
+                border-radius:8px;overflow:hidden;height:40px">
+                <button data-sheet-dec="${entry.item.id}"
+                  style="width:32px;height:40px;display:flex;align-items:center;
+                    justify-content:center;color:var(--muted);
+                    font-size:1.125rem;border:none;background:none;cursor:pointer;
+                    -webkit-tap-highlight-color:transparent;flex-shrink:0">−</button>
+                <input type="number"
+                  data-sheet-qty="${entry.item.id}"
+                  value="${entry.qty}"
+                  min="0.01" step="0.01" inputmode="decimal"
+                  style="flex:1;border:none;text-align:center;font-size:0.9375rem;
+                    font-weight:700;background:transparent;outline:none;
+                    min-width:0;width:100%;color:var(--dark);
+                    -moz-appearance:textfield;">
+                <button data-sheet-inc="${entry.item.id}"
+                  style="width:32px;height:40px;display:flex;align-items:center;
+                    justify-content:center;color:var(--muted);
+                    font-size:1.125rem;border:none;background:none;cursor:pointer;
+                    -webkit-tap-highlight-color:transparent;flex-shrink:0">+</button>
+              </div>
+            </div>
+
+            <!-- Price -->
+            <div style="display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:0.6875rem;font-weight:700;
+                color:${isLoss?'var(--danger)':'var(--muted)'};
+                text-transform:uppercase;letter-spacing:0.5px">
+                PRICE
+              </div>
+              <input type="number"
+                data-sheet-price="${entry.item.id}"
+                value="${entry.price > 0 ? entry.price : ''}"
+                placeholder="0.00"
+                min="0" step="0.01" inputmode="decimal"
+                style="height:40px;border:1.5px solid ${isLoss?'var(--danger)':'var(--border)'};
+                  border-radius:8px;text-align:center;
+                  font-size:0.9375rem;font-weight:700;
+                  color:${isLoss?'var(--danger)':'var(--accent)'};
+                  background:var(--bg-elevated);outline:none;
+                  width:100%;box-sizing:border-box;
+                  -moz-appearance:textfield;
+                  -webkit-user-select:text;user-select:text;">
+            </div>
+
+            <!-- Total -->
+            <div style="display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+                text-transform:uppercase;letter-spacing:0.5px">TOTAL</div>
+              <div data-sheet-total="${entry.item.id}"
+                style="height:40px;border-radius:8px;
+                  background:var(--bg-hover);
+                  display:flex;align-items:center;justify-content:center;
+                  font-size:0.875rem;font-weight:700;color:var(--dark);
+                  padding:0 6px;text-align:center;">
+                ${fmt(total)}
+              </div>
+            </div>
+          </div>
+
+          ${isLoss ? `
+            <div style="display:flex;align-items:center;gap:4px;
+              margin-top:8px;font-size:0.75rem;color:var(--danger);
+              background:var(--red-50);padding:4px 8px;border-radius:6px;">
+              ${renderIcon('alert',11,'var(--danger)')} Below cost (${fmt(cost)} ETB)
+            </div>
+          ` : ''}
+        </div>
+      `
+    }).join('')
+
+    if (sheetCheckout) {
+      sheetCheckout.style.display = 'block'
+      updateSheetTotals()
+    }
+
+    attachSheetListeners()
+  }
+
+  function attachSheetListeners() {
+    // Remove
+    document.querySelectorAll('[data-sheet-remove]').forEach(btn => {
+      btn.addEventListener('click', () => removeFromCart(btn.dataset.sheetRemove))
+    })
+
+    // Dec
+    document.querySelectorAll('[data-sheet-dec]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const entry = cart.find(c => c.item.id === btn.dataset.sheetDec)
+        if (!entry) return
+        if (entry.qty <= 1) { removeFromCart(entry.item.id); return }
+        entry.qty = Math.max(0.01, Math.round((entry.qty - 1)*100)/100)
+        const inp = document.querySelector(`[data-sheet-qty="${entry.item.id}"]`)
+        if (inp) inp.value = entry.qty
+        updateSheetLineTotal(entry.item.id)
+        updateSheetTotals()
+        if (!isMobile()) renderDesktopCart()
+      })
+    })
+
+    // Inc
+    document.querySelectorAll('[data-sheet-inc]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const entry = cart.find(c => c.item.id === btn.dataset.sheetInc)
+        if (!entry) return
+        entry.qty = Math.round((entry.qty + 1)*100)/100
+        const inp = document.querySelector(`[data-sheet-qty="${entry.item.id}"]`)
+        if (inp) inp.value = entry.qty
+        updateSheetLineTotal(entry.item.id)
+        updateSheetTotals()
+        if (!isMobile()) renderDesktopCart()
+      })
+    })
+
+    // Qty input
+    document.querySelectorAll('[data-sheet-qty]').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const entry = cart.find(c => c.item.id === inp.dataset.sheetQty)
+        if (!entry) return
+        entry.qty = Math.max(0.01, parseFloat(inp.value) || 1)
+        inp.value = entry.qty
+        updateSheetLineTotal(entry.item.id)
+        updateSheetTotals()
+        if (!isMobile()) renderDesktopCart()
+      })
+    })
+
+    // Price input — no re-render, keyboard stays open
+    document.querySelectorAll('[data-sheet-price]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const entry = cart.find(c => c.item.id === inp.dataset.sheetPrice)
+        if (!entry) return
+        entry.price = parseFloat(inp.value) || 0
+        updateSheetLineTotal(entry.item.id)
+        updateSheetTotals()
+        if (!isMobile()) renderDesktopCart()
+      })
+    })
+  }
+
+  function updateSheetLineTotal(itemId) {
+    const entry   = cart.find(c => c.item.id === itemId)
+    if (!entry) return
+    const total   = entry.qty * entry.price
+    const totalEl = document.querySelector(`[data-sheet-total="${itemId}"]`)
+    if (totalEl) totalEl.textContent = fmt(total)
+  }
+
+  function updateSheetTotals() {
+    const subtotal  = cart.reduce((s, e) => s + e.qty * e.price, 0)
+    const discAmt   = subtotal * (sheetDiscount / 100)
+    const total     = subtotal - discAmt
+    const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost)||0), 0)
+    const profit    = total - totalCost
+    const margin    = total > 0 ? profit/total*100 : 0
+
+    const set = id => { const el = document.getElementById(id); return el }
+    const ss = set('sheet-subtotal');    if(ss) ss.textContent = fmt(subtotal) + ' ETB'
+    const sd = set('sheet-discount-amt');if(sd) sd.textContent = '-' + fmt(discAmt) + ' ETB'
+    const st = set('sheet-total');       if(st) st.textContent = fmt(total) + ' ETB'
+
+    const pb = document.getElementById('sheet-profit-bar')
+    if (pb) {
+      if (profit < 0) {
+        pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
+          font-weight:600;color:#991B1B;background:var(--red-50);padding:6px 8px;
+          border-radius:8px;">${renderIcon('alert',12)} Net loss of ${fmt(Math.abs(profit))} ETB</div>`
+      } else if (margin < 10) {
+        pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
+          font-weight:600;color:#92400E;background:var(--amber-50);padding:6px 8px;
+          border-radius:8px;">${renderIcon('alert',12)} Low margin — ${margin.toFixed(1)}%</div>`
+      } else {
+        pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
+          font-weight:600;color:#15803D;background:var(--green-50);padding:6px 8px;
+          border-radius:8px;">${renderIcon('check',12)} ${margin.toFixed(1)}% margin</div>`
+      }
+    }
+  }
+
+  // Update the trigger bar at bottom
+  function updateTrigger() {
+    if (!trigger) return
+    if (!isMobile()) { trigger.style.display = 'none'; return }
+    trigger.style.display = cart.length > 0 ? 'block' : 'none'
+
+    const count = document.getElementById('mobile-cart-count')
+    const total = document.getElementById('mobile-cart-total')
+    if (count) {
+      count.style.display = cart.length > 0 ? 'inline-block' : 'none'
+      count.textContent   = cart.length
+    }
+    if (total) {
+      const t = cart.reduce((s, e) => s + e.qty * e.price, 0)
+      total.textContent = fmt(t) + ' ETB'
+    }
+  }
+
+  // ── Search ───────────────────────────────────────────────
   container.querySelector('#pos-search').addEventListener('input', e => {
     searchQuery = e.target.value.trim()
     container.querySelector('#pos-search-clear').style.display = searchQuery ? '' : 'none'
     renderProducts()
   })
-
   container.querySelector('#pos-search-clear').addEventListener('click', () => {
     searchQuery = ''
     container.querySelector('#pos-search').value = ''
@@ -617,81 +1036,124 @@ export async function render(container) {
     container.querySelector('#pos-search').focus()
   })
 
-  // ── View toggle ───────────────────────────────────────────
+  // ── View toggle ──────────────────────────────────────────
   container.querySelectorAll('.view-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       viewMode = btn.dataset.view
       localStorage.setItem('pos-view', viewMode)
-      container.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode))
+      container.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view===viewMode))
       renderProducts()
     })
   })
 
-  // ── Discount ──────────────────────────────────────────────
-  container.querySelector('#discount-input').addEventListener('input', e => {
-    discount = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))
-    updateTotals()
+  // ── Discount (desktop) ───────────────────────────────────
+  container.querySelector('#discount-input')?.addEventListener('input', e => {
+    discount = Math.min(100, Math.max(0, parseFloat(e.target.value)||0))
+    updateDesktopTotals()
   })
 
-  // ── Clear cart ────────────────────────────────────────────
-  container.querySelector('#btn-clear-cart').addEventListener('click', () => {
+  // ── Discount (mobile sheet) ──────────────────────────────
+  document.getElementById('sheet-discount')?.addEventListener('input', e => {
+    sheetDiscount = Math.min(100, Math.max(0, parseFloat(e.target.value)||0))
+    updateSheetTotals()
+  })
+
+  // ── Clear cart ───────────────────────────────────────────
+  container.querySelector('#btn-clear-cart')?.addEventListener('click', () => {
     if (!cart.length) return
     if (!confirm('Clear the entire cart?')) return
-    cart = []
-    renderCart()
-    renderProducts()
+    cart = []; renderCart(); renderProducts()
+  })
+  document.getElementById('sheet-clear')?.addEventListener('click', () => {
+    if (!cart.length) return
+    if (!confirm('Clear the entire cart?')) return
+    cart = []; renderCart(); renderProducts(); closeCartSheet()
   })
 
-  // ── Payment method ────────────────────────────────────────
+  // ── Payment method (desktop) ─────────────────────────────
   container.querySelectorAll('.pay-method-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       paymentMethod = btn.dataset.pay
-      container.querySelectorAll('.pay-method-btn').forEach(b => b.classList.toggle('active', b.dataset.pay === paymentMethod))
-      container.querySelector('#credit-fields').style.display     = paymentMethod === 'credit' ? 'block' : 'none'
-      container.querySelector('#optional-customer').style.display = paymentMethod === 'credit' ? 'none'  : 'block'
+      container.querySelectorAll('.pay-method-btn').forEach(b => b.classList.toggle('active', b.dataset.pay===paymentMethod))
+      container.querySelector('#credit-fields').style.display     = paymentMethod==='credit' ? 'block' : 'none'
+      container.querySelector('#optional-customer').style.display = paymentMethod==='credit' ? 'none'  : 'block'
     })
   })
 
-  // ── Sell ──────────────────────────────────────────────────
-  container.querySelector('#btn-sell').addEventListener('click', () => handleSell(currentStore))
+  // ── Payment method (mobile sheet) ────────────────────────
+  document.querySelectorAll('.sheet-pay-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      sheetPayMethod = btn.dataset.pay
+      document.querySelectorAll('.sheet-pay-btn').forEach(b => {
+        b.style.borderColor  = b.dataset.pay===sheetPayMethod ? 'var(--accent)' : 'var(--border)'
+        b.style.background   = b.dataset.pay===sheetPayMethod ? 'var(--teal-50)' : 'var(--bg-elevated)'
+        b.style.color        = b.dataset.pay===sheetPayMethod ? 'var(--accent)' : 'var(--muted)'
+      })
+      const cf = document.getElementById('sheet-credit-fields')
+      if (cf) cf.style.display = sheetPayMethod==='credit' ? 'block' : 'none'
+    })
+  })
 
-  async function handleSell(store) {
+  // ── Sell (desktop) ───────────────────────────────────────
+  container.querySelector('#btn-sell')?.addEventListener('click', () => handleSell({
+    pmField:       '#pos-checkout .pay-method-btn.active',
+    noteField:     '#sale-note',
+    accountField:  '#sale-account',
+    bulkField:     '#bulk-toggle',
+    creditName:    '#credit-name',
+    creditPhone:   '#credit-phone',
+    getPayMethod:  () => paymentMethod,
+    getDiscount:   () => discount,
+  }))
+
+  // ── Sell (mobile sheet) ──────────────────────────────────
+  document.getElementById('sheet-sell')?.addEventListener('click', () => handleSell({
+    noteField:     '#sheet-note',
+    accountField:  '#sheet-account',
+    bulkField:     '#sheet-bulk',
+    creditName:    '#sheet-credit-name',
+    creditPhone:   '#sheet-credit-phone',
+    getPayMethod:  () => sheetPayMethod,
+    getDiscount:   () => sheetDiscount,
+    onSuccess:     closeCartSheet,
+  }))
+
+  async function handleSell({ noteField, accountField, bulkField, creditName, creditPhone, getPayMethod, getDiscount, onSuccess }) {
     if (!cart.length) { showToast('Add at least one product', 'error'); return }
 
+    const pm        = getPayMethod()
+    const disc      = getDiscount()
     const subtotal  = cart.reduce((s, e) => s + e.qty * e.price, 0)
-    const discAmt   = subtotal * (discount / 100)
+    const discAmt   = subtotal * (disc / 100)
     const total     = subtotal - discAmt
-    const isBulk    = container.querySelector('#bulk-toggle')?.checked
-    const accountId = container.querySelector('#sale-account')?.value
-    const note      = container.querySelector('#sale-note')?.value.trim()
-    const isCredit  = paymentMethod === 'credit'
+    const isBulk    = document.querySelector(bulkField)?.checked
+    const accountId = document.querySelector(accountField)?.value
+    const note      = document.querySelector(noteField)?.value?.trim()
+    const isCredit  = pm === 'credit'
 
-    if (isCredit && !container.querySelector('#credit-name')?.value.trim()) {
+    if (isCredit && !document.querySelector(creditName)?.value?.trim()) {
       showToast('Customer name required for credit sale', 'error'); return
     }
 
-    const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost) || 0), 0)
+    const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost)||0), 0)
     if (total < totalCost) {
       if (!confirm(`⚠️ This sale results in a loss of ${fmt(totalCost - total)} ETB. Continue?`)) return
     }
 
-    const btn = container.querySelector('#btn-sell')
-    btn.textContent = 'Processing...'
-    btn.disabled    = true
+    // Disable sell button
+    const sellBtn = document.querySelector('#btn-sell') || document.querySelector('#sheet-sell')
+    if (sellBtn) { sellBtn.textContent = 'Processing...'; sellBtn.disabled = true }
 
     try {
-      const { data: sale, error: saleErr } = await supabase
-        .from('sales')
-        .insert({
-          store_id:        store?.id,
-          cash_account_id: isCredit ? null : (accountId || null),
-          sale_date:       new Date().toISOString().split('T')[0],
-          total_amount:    total,
-          payment_method:  paymentMethod,
-          source:          'manual',
-          notes:           note || null,
-        })
-        .select().single()
+      const { data: sale, error: saleErr } = await supabase.from('sales').insert({
+        store_id:        currentStore?.id,
+        cash_account_id: isCredit ? null : (accountId||null),
+        sale_date:       new Date().toISOString().split('T')[0],
+        total_amount:    total,
+        payment_method:  pm,
+        source:          'manual',
+        notes:           note || null,
+      }).select().single()
 
       if (saleErr) throw saleErr
 
@@ -705,7 +1167,7 @@ export async function render(container) {
         })
         if (!isBulk) {
           await supabase.from('stock_movements').insert({
-            store_id:      store?.id,
+            store_id:      currentStore?.id,
             item_id:       entry.item.id,
             movement_type: 'out',
             quantity:      entry.qty,
@@ -715,61 +1177,57 @@ export async function render(container) {
         }
       }
 
-      await audit.salecompleted(sale, cart.map(e => ({ name: e.item.item_name, qty: e.qty, price: e.price })))
+      await audit.salecompleted(sale, cart.map(e => ({ name:e.item.item_name, qty:e.qty, price:e.price })))
 
       if (isCredit) {
-        const custName  = container.querySelector('#credit-name').value.trim()
-        const custPhone = container.querySelector('#credit-phone')?.value.trim() || null
+        const custName  = document.querySelector(creditName)?.value?.trim()
+        const custPhone = document.querySelector(creditPhone)?.value?.trim() || null
         let customer    = customers.find(c => c.name.toLowerCase() === custName.toLowerCase())
         if (!customer) {
           const { data } = await supabase.from('customers').insert({
-            store_id: store?.id, name: custName, phone: custPhone,
+            store_id: currentStore?.id, name: custName, phone: custPhone,
           }).select().single()
-          customer = data
-          customers.push(customer)
+          customer = data; customers.push(customer)
         }
         await supabase.from('credit_sales').insert({
-          store_id: store?.id, sale_id: sale.id,
+          store_id: currentStore?.id, sale_id: sale.id,
           customer_id: customer.id, amount_owed: total, status: 'unpaid',
         })
       }
 
       try {
-        await postSaleEntry({ storeId: store?.id, saleId: sale.id, date: new Date().toISOString().split('T')[0], amount: total, isCredit })
-      } catch(e) { console.warn('Journal post skipped:', e.message) }
+        await postSaleEntry({ storeId:currentStore?.id, saleId:sale.id, date:new Date().toISOString().split('T')[0], amount:total, isCredit })
+      } catch(e) { console.warn('Journal:', e.message) }
 
+      if (onSuccess) onSuccess()
       showSaleSuccess(total, cart.length, sale.id)
-      cart = []
-      renderCart()
+      cart = []; renderCart(); renderProducts()
       invalidateAfterSale()
       const fresh = await getInventory()
-      allItems = fresh || []
-      renderProducts()
+      allItems = fresh || []; renderProducts()
 
     } catch(err) {
       console.error('Sale error:', err)
       showToast(`Sale failed: ${err.message}`, 'error')
     } finally {
-      btn.innerHTML = `${renderIcon('check', 18)} Complete Sale`
-      btn.disabled  = false
+      const b1 = container.querySelector('#btn-sell')
+      const b2 = document.querySelector('#sheet-sell')
+      if (b1) { b1.innerHTML = `${renderIcon('check',18)} Complete Sale`; b1.disabled = false }
+      if (b2) { b2.innerHTML = `${renderIcon('check',20)} Complete Sale`; b2.disabled = false }
     }
   }
 
   function showSaleSuccess(total, itemCount, saleId) {
     const overlay = document.createElement('div')
-    overlay.style.cssText = `
-      position:fixed;inset:0;background:rgba(0,0,0,0.4);
+    overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.4);
       backdrop-filter:blur(8px);z-index:400;
-      display:flex;align-items:center;justify-content:center;
-    `
+      display:flex;align-items:center;justify-content:center;padding:1rem;`
     overlay.innerHTML = `
-      <div style="
-        background:var(--bg-elevated);border-radius:24px;padding:2.5rem 2rem;
-        text-align:center;max-width:320px;width:90%;
-        box-shadow:var(--shadow-lg);animation:sale-pop 0.4s cubic-bezier(0.34,1.56,0.64,1);
-      ">
+      <div style="background:var(--bg-elevated);border-radius:24px;padding:2.5rem 2rem;
+        text-align:center;max-width:320px;width:100%;box-shadow:var(--shadow-lg);
+        animation:sale-pop 0.4s cubic-bezier(0.34,1.56,0.64,1);">
         <div style="width:64px;height:64px;background:var(--teal-50);border-radius:50%;
-          display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;color:var(--accent);">
+          display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;">
           ${renderIcon('check', 28, 'var(--accent)')}
         </div>
         <div style="font-size:1.25rem;font-weight:700;margin-bottom:0.25rem">Sale Complete!</div>
@@ -780,15 +1238,15 @@ export async function render(container) {
           ${itemCount} item${itemCount!==1?'s':''} sold
         </div>
         <div style="display:flex;flex-direction:column;gap:0.5rem">
-          <button style="width:100%;padding:0.75rem;background:var(--bg-subtle);color:var(--dark);
-            border-radius:14px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);
-            display:flex;align-items:center;justify-content:center;gap:0.5rem;" id="btn-view-receipt">
+          <button style="width:100%;padding:0.75rem;background:var(--bg-subtle);
+            color:var(--dark);border-radius:14px;font-weight:600;cursor:pointer;
+            border:1.5px solid var(--border);display:flex;align-items:center;
+            justify-content:center;gap:0.5rem;" id="btn-view-receipt">
             ${renderIcon('reports', 16)} Receipt & Share
           </button>
           <button style="width:100%;padding:0.75rem;background:var(--accent);color:#fff;
-            border-radius:14px;font-weight:600;cursor:pointer;border:none;" id="success-close">
-            New Sale
-          </button>
+            border-radius:14px;font-weight:600;cursor:pointer;border:none;"
+            id="success-close">New Sale</button>
         </div>
       </div>
     `
@@ -803,14 +1261,14 @@ export async function render(container) {
   renderCart()
 }
 
-// ── Helpers ───────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────
 const PAY_LABELS = {
-  cash: 'Cash', bank_transfer: 'Bank', telebirr: 'Telebirr',
-  cbe_birr: 'CBE Birr', credit: 'Credit', other: 'Other',
+  cash:'Cash', bank_transfer:'Bank', telebirr:'Telebirr',
+  cbe_birr:'CBE Birr', credit:'Credit', other:'Other',
 }
 
 function fmt(n) {
-  return Number(n||0).toLocaleString('en-ET', { minimumFractionDigits:2, maximumFractionDigits:2 })
+  return Number(n||0).toLocaleString('en-ET',{minimumFractionDigits:2,maximumFractionDigits:2})
 }
 
 function highlight(text, query) {
@@ -820,14 +1278,12 @@ function highlight(text, query) {
     `<mark style="background:var(--teal-200);color:var(--teal-900);border-radius:2px;padding:0 1px">$1</mark>`)
 }
 
-function showToast(msg, type = 'info') {
+function showToast(msg, type='info') {
   const t = document.createElement('div')
-  t.className = `toast toast-${type}`
-  t.textContent = msg
+  t.className = `toast toast-${type}`; t.textContent = msg
   let wrap = document.querySelector('.toast-container')
   if (!wrap) { wrap = document.createElement('div'); wrap.className = 'toast-container'; document.body.appendChild(wrap) }
-  wrap.appendChild(t)
-  setTimeout(() => t.remove(), 3500)
+  wrap.appendChild(t); setTimeout(() => t.remove(), 3500)
 }
 
 function injectPOSStyles() {
@@ -835,56 +1291,34 @@ function injectPOSStyles() {
   const style = document.createElement('style')
   style.id = 'pos-styles'
   style.textContent = `
-    @keyframes sale-pop {
-      from { transform:scale(0.8);opacity:0; }
-      to   { transform:scale(1);  opacity:1; }
-    }
-    .pos-layout {
-      display:grid;grid-template-columns:1fr 380px;
-      gap:1.25rem;height:calc(100vh - 4rem);max-height:900px;
-    }
+    @keyframes sale-pop { from{transform:scale(0.8);opacity:0} to{transform:scale(1);opacity:1} }
+
+    .pos-layout { display:grid;grid-template-columns:1fr 380px;gap:1.25rem;height:calc(100vh - 4rem);max-height:900px; }
     .pos-left { display:flex;flex-direction:column;min-height:0;overflow:hidden; }
-    .pos-right {
-      display:flex;flex-direction:column;
-      background:var(--bg-elevated);border:1px solid var(--border);
-      border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm);
-    }
+    .pos-right { display:flex;flex-direction:column;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm); }
+
     .pos-search-wrap { margin-bottom:0.875rem; }
-    .pos-search-inner {
-      display:flex;align-items:center;gap:0.5rem;
-      background:var(--bg-elevated);border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);padding:0.5rem 0.875rem;
-      transition:border-color 0.15s,box-shadow 0.15s;
-    }
-    .pos-search-inner:focus-within {
-      border-color:var(--accent);box-shadow:0 0 0 3px rgba(13,148,136,0.1);
-    }
-    .pos-search-input {
-      flex:1;border:none;outline:none;background:transparent;
-      font-size:0.9375rem;color:var(--dark);
-    }
+    .pos-search-inner { display:flex;align-items:center;gap:0.5rem;background:var(--bg-elevated);border:1.5px solid var(--border);border-radius:var(--radius-lg);padding:0.5rem 0.875rem;transition:border-color 0.15s,box-shadow 0.15s; }
+    .pos-search-inner:focus-within { border-color:var(--accent);box-shadow:0 0 0 3px rgba(13,148,136,0.1); }
+    .pos-search-input { flex:1;border:none;outline:none;background:transparent;font-size:0.9375rem;color:var(--dark); }
     .pos-search-clear { color:var(--muted);padding:2px;border-radius:50%;display:flex;transition:all 0.15s; }
     .pos-search-clear:hover { background:var(--bg-hover);color:var(--dark); }
+
     .view-toggle { display:flex;background:var(--bg-subtle);border-radius:var(--radius);padding:2px;gap:2px; }
     .view-btn { padding:0.3rem 0.5rem;border-radius:var(--radius-sm);color:var(--muted);transition:all 0.15s;display:flex;align-items:center; }
     .view-btn.active { background:var(--bg-elevated);color:var(--accent);box-shadow:var(--shadow-xs); }
+
     .pos-categories { display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.875rem; }
-    .cat-chip {
-      padding:0.3rem 0.875rem;border-radius:var(--radius-pill);font-size:0.8125rem;font-weight:600;
-      border:1.5px solid var(--border);background:var(--bg-elevated);color:var(--muted);
-      cursor:pointer;transition:all 0.15s;white-space:nowrap;
-    }
+    .cat-chip { padding:0.3rem 0.875rem;border-radius:var(--radius-pill);font-size:0.8125rem;font-weight:600;border:1.5px solid var(--border);background:var(--bg-elevated);color:var(--muted);cursor:pointer;transition:all 0.15s;white-space:nowrap; }
     .cat-chip:hover { border-color:var(--accent);color:var(--accent); }
     .cat-chip.active { background:var(--teal-50);border-color:var(--accent);color:var(--accent); }
+
     .pos-products { flex:1;overflow-y:auto;padding-right:2px; }
     .pos-products.grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.75rem;align-content:start; }
     .pos-products.list { display:flex;flex-direction:column; }
     .products-empty { grid-column:1/-1;text-align:center;padding:3rem 1.5rem;display:flex;flex-direction:column;align-items:center; }
-    .product-card {
-      background:var(--bg-elevated);border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);cursor:pointer;transition:all 0.18s;
-      position:relative;overflow:hidden;
-    }
+
+    .product-card { background:var(--bg-elevated);border:1.5px solid var(--border);border-radius:var(--radius-lg);cursor:pointer;transition:all 0.18s;position:relative;overflow:hidden; }
     .product-card:hover { border-color:var(--accent);box-shadow:var(--shadow-sm);transform:translateY(-2px); }
     .product-card.in-cart { border-color:var(--accent);background:var(--teal-50); }
     .product-card.out-of-stock { opacity:0.5;pointer-events:none; }
@@ -897,15 +1331,10 @@ function injectPOSStyles() {
     .product-stock { font-size:0.6875rem;font-weight:600;margin-top:2px; }
     .product-stock.ok { color:var(--success); }
     .product-stock.out { color:var(--danger); }
-    .product-add-btn {
-      position:absolute;bottom:0.5rem;right:0.5rem;width:26px;height:26px;
-      border-radius:50%;background:var(--accent);color:#fff;
-      display:flex;align-items:center;justify-content:center;
-      transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1);
-      box-shadow:0 2px 6px rgba(13,148,136,0.3);
-    }
+    .product-add-btn { position:absolute;bottom:0.5rem;right:0.5rem;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1);box-shadow:0 2px 6px rgba(13,148,136,0.3); }
     .product-add-btn.added { background:var(--teal-50);border:1.5px solid var(--accent); }
     .product-add-btn:hover { transform:scale(1.15); }
+
     .product-list { display:flex;flex-direction:column;gap:1px; }
     .product-row { display:flex;align-items:center;gap:0.75rem;padding:0.625rem 0.75rem;border-radius:var(--radius);cursor:pointer;transition:all 0.15s; }
     .product-row:hover { background:var(--bg-subtle); }
@@ -916,15 +1345,13 @@ function injectPOSStyles() {
     .product-row-dot.active { background:var(--accent);border-color:var(--accent); }
     .product-row-info { flex:1;min-width:0; }
     .product-row-name { font-size:0.875rem;font-weight:600;color:var(--dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-    .product-row-meta { display:flex;gap:0.5rem;font-size:0.75rem;color:var(--muted);margin-top:1px;flex-wrap:wrap;align-items:center; }
-    .product-row-meta span { display:inline-flex;align-items:center;white-space:nowrap; }
-    .product-row-meta span:not(:last-child)::after { content:'·';margin-left:0.5rem;color:var(--border); }
+    .product-row-meta { display:flex;gap:0.5rem;font-size:0.75rem;color:var(--muted);margin-top:1px;flex-wrap:wrap; }
     .in-stock-text { color:var(--success);font-weight:600; }
     .out-of-stock-text { color:var(--danger);font-weight:600; }
     .product-row-price { font-size:0.9375rem;font-weight:700;color:var(--accent);white-space:nowrap; }
     .product-row-add { width:26px;height:26px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1); }
     .product-row-add.added { background:var(--teal-50);border:1.5px solid var(--accent); }
-    .product-row-add:hover { transform:scale(1.15); }
+
     .pos-cart-header { display:flex;align-items:center;justify-content:space-between;padding:1rem 1.125rem;border-bottom:1px solid var(--border); }
     .cart-count { background:var(--accent);color:#fff;font-size:0.6875rem;font-weight:700;border-radius:999px;padding:1px 6px; }
     .pos-cart-items { flex:1;overflow-y:auto;padding:0.75rem; }
@@ -942,18 +1369,12 @@ function injectPOSStyles() {
     .qty-input::-webkit-outer-spin-button,.qty-input::-webkit-inner-spin-button { -webkit-appearance:none; }
     .price-input-wrap { display:flex;align-items:center;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;flex:1;min-width:0; }
     .price-prefix { font-size:0.75rem;color:var(--muted);padding:0 0.375rem;white-space:nowrap; }
-    .price-input {
-      flex:1;border:none;outline:none;background:transparent;
-      font-size:0.875rem;font-weight:600;color:var(--accent);
-      padding:0.35rem 0.375rem 0.35rem 0;min-width:0;
-      -moz-appearance:textfield;
-      /* CRITICAL: prevents keyboard dismiss on iOS */
-      -webkit-user-select:text;user-select:text;
-    }
+    .price-input { flex:1;border:none;outline:none;background:transparent;font-size:0.875rem;font-weight:600;color:var(--accent);padding:0.35rem 0.375rem 0.35rem 0;min-width:0;-moz-appearance:textfield;-webkit-user-select:text;user-select:text; }
     .price-input.price-loss { color:var(--danger); }
     .price-input::-webkit-outer-spin-button,.price-input::-webkit-inner-spin-button { -webkit-appearance:none; }
     .cart-line-total { font-size:0.875rem;font-weight:700;color:var(--dark);white-space:nowrap;min-width:70px;text-align:right; }
     .loss-warning { display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;color:var(--danger);margin-top:0.4rem;background:var(--red-50);padding:0.3rem 0.5rem;border-radius:var(--radius-sm); }
+
     .pos-totals { padding:0.875rem 1.125rem;border-top:1px solid var(--border); }
     .total-row { display:flex;justify-content:space-between;align-items:center;padding:0.25rem 0;font-size:0.875rem; }
     .total-label { display:flex;align-items:center;gap:0.35rem;color:var(--muted); }
@@ -973,17 +1394,52 @@ function injectPOSStyles() {
     .pay-method-btn.active { background:var(--teal-50);border-color:var(--accent);color:var(--accent); }
     .credit-banner { display:flex;align-items:center;gap:0.4rem;font-size:0.8125rem;font-weight:600;color:#92400E;background:var(--amber-50);border:1px solid #FDE68A;border-radius:var(--radius);padding:0.5rem 0.75rem; }
     .optional-summary { font-size:0.8125rem;color:var(--muted);cursor:pointer;padding:0.25rem 0;font-weight:500;user-select:none; }
-    .optional-summary:hover { color:var(--dark); }
     .btn-sell { width:100%;justify-content:center;padding:0.75rem;font-size:0.9375rem;border-radius:var(--radius-lg);gap:0.5rem; }
-    @media (max-width:768px) {
-      .pos-layout { grid-template-columns:1fr;height:auto;max-height:none;gap:0; }
-      .pos-left { padding-bottom:80px; }
-      .pos-right { position:fixed;bottom:0;left:0;right:0;z-index:250;border-radius:24px 24px 0 0;border:none;border-top:1px solid var(--border);max-height:85dvh;transform:translateY(100%);transition:transform 0.35s cubic-bezier(0.32,0.72,0,1);background:var(--bg-elevated);display:flex !important; }
-      .pos-right.open { transform:translateY(0); }
-      .pos-cart-header::before { content:'';position:absolute;top:8px;left:50%;transform:translateX(-50%);width:36px;height:4px;background:var(--border);border-radius:999px; }
-      .pos-cart-header { position:relative;cursor:pointer; }
-      .pos-cart-items { max-height:40dvh; }
-      .pos-products.grid { grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); }
+
+    /* Mobile cart trigger bar */
+    #mobile-cart-trigger {
+      display: none;
+      position: fixed;
+      bottom: calc(var(--mobile-nav-total, 70px) + 8px);
+      left: 12px;
+      right: 12px;
+      z-index: 220;
+    }
+
+    #mobile-cart-trigger button {
+      width: 100%;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 16px;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(13,148,136,0.35);
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    #mobile-cart-trigger button:active {
+      transform: scale(0.97);
+    }
+
+    /* Sheet qty input */
+    [data-sheet-qty]::-webkit-inner-spin-button,
+    [data-sheet-qty]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    [data-sheet-price]::-webkit-inner-spin-button,
+    [data-sheet-price]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+    @media (max-width: 768px) {
+      .pos-layout { display:flex !important;flex-direction:column !important;height:auto !important;max-height:none !important;gap:0 !important; }
+      .pos-left { overflow:visible !important;padding-bottom:120px !important; }
+      .pos-right { display:none !important; }
+      .pos-products { overflow:visible !important;max-height:none !important; }
+      .pos-products.grid { grid-template-columns:repeat(2,1fr) !important; }
+      #mobile-cart-trigger { display:block; }
     }
   `
   document.head.appendChild(style)

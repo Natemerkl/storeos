@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js'
 const MOBILE_ITEMS = [
   { path: '/dashboard',    icon: 'dashboard',    label: 'Home'    },
   { path: '/inventory',    icon: 'inventory',    label: 'Stock'   },
-  { path: '/transactions', icon: 'transactions', label: 'Sales'   },
+  { path: '/sales',        icon: 'store',        label: 'POS'     },
   { path: '/credits',      icon: 'credits',      label: 'Credits' },
   { path: '/accounting',   icon: 'accounting',   label: 'Finance' },
 ]
@@ -34,14 +34,6 @@ export function initMobileNav() {
   const nav = document.createElement('div')
   nav.id             = 'mobile-nav'
   nav.style.display  = 'none'
-
-  // ── FAB camera ─────────────────────────────────────────
-  const fab = document.createElement('button')
-  fab.id             = 'fab-camera'
-  fab.className      = 'fab-camera'
-  fab.style.display  = 'none'
-  fab.setAttribute('aria-label', 'Scan receipt')
-  fab.innerHTML      = Icons.camera?.(22) || ''
 
   // ── Drawer ─────────────────────────────────────────────
   const drawer = document.createElement('div')
@@ -148,7 +140,6 @@ export function initMobileNav() {
 
   document.body.appendChild(drawer)
   document.body.appendChild(nav)
-  document.body.appendChild(fab)
 
   // ── Visibility ─────────────────────────────────────────
   function updateVisibility() {
@@ -156,7 +147,6 @@ export function initMobileNav() {
     const mobile = window.innerWidth <= 768
     const show   = !hidden && mobile
     nav.style.display = show ? 'block' : 'none'
-    fab.style.display = show ? 'flex'  : 'none'
     if (!show && drawerOpen) closeDrawer()
   }
 
@@ -343,33 +333,6 @@ export function initMobileNav() {
   drawer.querySelector('#drawer-signout').addEventListener('click', async () => {
     closeDrawer()
     await supabase.auth.signOut()
-  })
-
-  // ── FAB camera ─────────────────────────────────────────
-  fab.addEventListener('click', () => {
-    if (navigator.vibrate) navigator.vibrate(10)
-    const input   = document.createElement('input')
-    input.type    = 'file'
-    input.accept  = 'image/*'
-    input.capture = 'environment'
-    input.style.cssText = 'position:fixed;top:-9999px;opacity:0;pointer-events:none'
-    document.body.appendChild(input)
-    input.addEventListener('change', e => {
-      document.body.removeChild(input)
-      if (!e.target.files?.[0]) return
-      const file   = e.target.files[0]
-      const reader = new FileReader()
-      reader.onload = ev => {
-        try {
-          sessionStorage.setItem('pending_scan_name', file.name)
-          sessionStorage.setItem('pending_scan_type', file.type)
-          sessionStorage.setItem('pending_scan_data', ev.target.result)
-        } catch(_) {}
-        navigate('/ocr')
-      }
-      reader.readAsDataURL(file)
-    })
-    input.click()
   })
 
   // ── Route & resize listeners ────────────────────────────

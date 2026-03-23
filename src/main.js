@@ -61,15 +61,12 @@ function showLoadingScreen() {
 // ── Mobile nav ─────────────────────────────────────────────
 function hideMobileNav() {
   document.getElementById('mobile-nav')?.style.setProperty('display', 'none')
-  document.getElementById('fab-camera')?.style.setProperty('display', 'none')
 }
 
 function showMobileNav() {
   if (window.innerWidth > 768) return
   const nav = document.getElementById('mobile-nav')
-  const fab = document.getElementById('fab-camera')
   if (nav) nav.style.display = 'block'
-  if (fab) fab.style.display = 'flex'
 }
 
 // ── Build full-screen layout (auth/onboarding) ─────────────

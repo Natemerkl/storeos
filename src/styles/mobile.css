@@ -154,46 +154,6 @@
   border-radius: 50%;
 }
 
-/* ── FAB Camera ───────────────────────────────────────────── */
-.fab-camera {
-  position: fixed;
-  /* Above the nav bar with proper spacing */
-  bottom: calc(var(--mobile-nav-total) + 12px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 201;
-  display: none;
-
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-
-  background: linear-gradient(
-    145deg,
-    rgba(255,255,255,0.95),
-    rgba(13,148,136,0.15)
-  );
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border: 1.5px solid rgba(255,255,255,0.85);
-  box-shadow:
-    0 6px 20px rgba(13,148,136,0.25),
-    0 2px 6px rgba(0,0,0,0.08),
-    inset 0 1px 0 rgba(255,255,255,0.95);
-
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
-  align-items: center;
-  justify-content: center;
-  color: var(--accent, #0D9488);
-}
-
-.fab-camera:active {
-  transform: translateX(-50%) scale(0.88);
-}
-
 /* ══════════════════════════════════════════════════════════
    MOBILE RESPONSIVE RULES
    Critical: padding-bottom on all pages = nav height + buffer
@@ -205,7 +165,6 @@
   /* ── Show mobile nav ──────────────────────────────────── */
   .sidebar     { display: none !important; }
   .mobile-nav  { display: block; }
-  .fab-camera  { display: flex; }
 
   /* ── CRITICAL: Main content always has enough bottom padding ── */
   .main-content {
@@ -523,7 +482,6 @@ body.lite-mode .lite-only                { display: block !important; }
 /* ── Reduced motion ───────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .mobile-nav-item,
-  .fab-camera,
   .btn {
     transition: none !important;
     animation: none !important;
@@ -550,4 +508,36 @@ body.lite-mode .lite-only                { display: block !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; background: var(--gray-100, #F3F4F6); }
+}
+/* ── FAB embedded in nav ──────────────────────────────────── */
+.mobile-nav-fab {
+  position: relative;
+}
+
+.m-fab-inner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent, #0D9488);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(13,148,136,0.35);
+  transition: transform 0.2s cubic-bezier(0.34,1.56,0.64,1),
+              box-shadow 0.2s;
+  margin-bottom: 1px;
+}
+
+.mobile-nav-fab:active .m-fab-inner {
+  transform: scale(0.88);
+  box-shadow: 0 2px 6px rgba(13,148,136,0.25);
+}
+
+.mobile-nav-fab.active .m-fab-inner {
+  background: var(--accent-dark, #0F766E);
+}
+
+.mobile-nav-fab .m-label {
+  color: var(--accent, #0D9488);
 }
