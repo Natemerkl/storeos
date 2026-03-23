@@ -6,6 +6,8 @@ import { renderIcon } from '../components/icons.js'
 import { openReceiptModal } from '../components/receipt-modal.js'
 import { audit } from '../utils/audit.js'
 import { getInventory, invalidateAfterSale } from '../utils/db.js'
+import { checkSaleAgainstInventory } from '../utils/inventory-resolver.js'
+import { openInventoryResolverModal } from '../components/inventory-resolver-modal.js'
 
 let viewMode    = localStorage.getItem('pos-view') || 'grid'
 let cart        = []
@@ -175,9 +177,13 @@ export async function render(container) {
               Bulk sale — skip stock deduction
             </label>
           </div>
-          <button class="btn btn-primary btn-sell" id="btn-sell">
-            ${renderIcon('check', 18)} Complete Sale
-          </button>
+          <div style="position:sticky;bottom:0;background:var(--bg-subtle);
+            padding-top:0.75rem;margin:-0.875rem -1.125rem 0;
+            padding:0.75rem 1.125rem 0;border-top:1px solid var(--border);margin-top:0.5rem">
+            <button class="btn btn-primary btn-sell" id="btn-sell">
+              ${renderIcon('check', 18)} Complete Sale
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -496,25 +502,106 @@ export async function render(container) {
         const inCart     = cart.find(c => c.item.id === item.id)
         const outOfStock = Number(item.quantity) <= 0
         const price      = getItemPrice(item)
+        const isLow      = !outOfStock && Number(item.quantity) <= Number(item.low_stock_threshold || 5)
+
+        // Category color accent
+        const catColors = {
+          default: { bg: '#F0FDFA', border: '#99F6E4', dot: '#0D9488' },
+        }
+        const accent = catColors.default
+
         return `
           <div class="product-card ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}"
-            data-id="${item.id}">
-            <div class="product-card-inner">
-              <div class="product-icon-wrap">
-                ${renderIcon('inventory', 20, inCart ? 'var(--accent)' : 'var(--gray-400)')}
+            data-id="${item.id}" style="
+              position:relative;cursor:pointer;
+              background:${inCart ? 'var(--teal-50)' : 'var(--bg-elevated)'};
+              border:1.5px solid ${inCart ? 'var(--accent)' : outOfStock ? 'var(--gray-200)' : 'var(--border)'};
+              border-radius:16px;
+              transition:all 0.18s;
+              overflow:hidden;
+              ${outOfStock ? 'opacity:0.55;pointer-events:none;' : ''}
+            ">
+
+            <!-- Top color bar -->
+            <div style="height:3px;background:${inCart ? 'var(--accent)' : outOfStock ? 'var(--gray-200)' : accent.border};"></div>
+
+            <div style="padding:12px 12px 10px">
+
+              <!-- Name — full, wraps to 2 lines max -->
+              <div style="
+                font-weight:700;font-size:0.875rem;
+                color:${outOfStock ? 'var(--muted)' : 'var(--dark)'};
+                line-height:1.35;
+                display:-webkit-box;-webkit-line-clamp:2;
+                -webkit-box-orient:vertical;overflow:hidden;
+                min-height:2.4em;margin-bottom:6px;
+                letter-spacing:-0.1px;
+              ">${highlight(item.item_name, searchQuery)}</div>
+
+              <!-- Category -->
+              ${item.category ? `
+                <div style="
+                  font-size:0.6875rem;font-weight:600;
+                  color:var(--muted);margin-bottom:8px;
+                  text-transform:uppercase;letter-spacing:0.4px;
+                ">${item.category}</div>
+              ` : '<div style="margin-bottom:8px"></div>'}
+
+              <!-- Price — large and prominent -->
+              <div style="
+                font-size:${price > 99999 ? '0.9375rem' : '1.0625rem'};
+                font-weight:800;
+                color:${outOfStock ? 'var(--muted)' : inCart ? 'var(--accent)' : 'var(--dark)'};
+                letter-spacing:-0.3px;
+                line-height:1;margin-bottom:6px;
+              ">
+                ${price > 0 ? fmt(price) : '—'}
+                ${price > 0 ? '<span style="font-size:0.6875rem;font-weight:600;color:var(--muted);margin-left:2px">ETB</span>' : ''}
               </div>
-              <div class="product-name">${highlight(item.item_name, searchQuery)}</div>
-              <div class="product-cat">${item.category || ''}</div>
-              <div class="product-price">
-                ${price > 0 ? fmt(price) + ' ETB' : 'No price'}
-              </div>
-              <div class="product-stock ${outOfStock?'out':'ok'}">
-                ${outOfStock ? 'Out of stock' : item.quantity + ' in stock'}
+
+              <!-- Stock badge -->
+              <div style="
+                display:inline-flex;align-items:center;gap:3px;
+                font-size:0.6875rem;font-weight:600;
+                padding:2px 7px;border-radius:999px;
+                background:${outOfStock ? 'var(--red-50)' : isLow ? 'var(--amber-50)' : 'var(--green-50)'};
+                color:${outOfStock ? '#991B1B' : isLow ? '#92400E' : '#15803D'};
+              ">
+                <div style="width:5px;height:5px;border-radius:50%;flex-shrink:0;
+                  background:${outOfStock ? '#EF4444' : isLow ? '#F59E0B' : '#22C55E'};"></div>
+                ${outOfStock ? 'Out of stock' : isLow ? item.quantity + ' left' : item.quantity + ' in stock'}
               </div>
             </div>
-            <button class="product-add-btn ${inCart?'added':''}" data-id="${item.id}">
-              ${inCart ? renderIcon('check',14,'var(--accent)') : renderIcon('plus',14,'#fff')}
+
+            <!-- Add button — bottom right -->
+            <button class="product-add-btn ${inCart?'added':''}" data-id="${item.id}"
+              style="
+                position:absolute;bottom:10px;right:10px;
+                width:30px;height:30px;border-radius:50%;
+                display:flex;align-items:center;justify-content:center;
+                transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+                background:${inCart ? 'var(--teal-50)' : 'var(--accent)'};
+                border:${inCart ? '1.5px solid var(--accent)' : 'none'};
+                box-shadow:${inCart ? 'none' : '0 3px 8px rgba(13,148,136,0.35)'};
+                cursor:pointer;
+              ">
+              ${inCart
+                ? renderIcon('check', 14, 'var(--accent)')
+                : renderIcon('plus', 14, '#fff')
+              }
             </button>
+
+            <!-- Cart quantity indicator (if in cart) -->
+            ${inCart ? `
+              <div style="
+                position:absolute;top:8px;right:8px;
+                background:var(--accent);color:#fff;
+                font-size:0.6875rem;font-weight:800;
+                border-radius:999px;padding:1px 6px;
+                min-width:18px;text-align:center;
+                box-shadow:0 1px 4px rgba(13,148,136,0.3);
+              ">${inCart.qty}</div>
+            ` : ''}
           </div>
         `
       }).join('')
@@ -633,35 +720,87 @@ export async function render(container) {
     itemsEl.innerHTML = cart.map(entry => {
       const cost   = Number(entry.item.unit_cost) || 0
       const isLoss = entry.price > 0 && cost > 0 && entry.price < cost
+      const total  = entry.qty * entry.price
+
       return `
-        <div class="cart-item" data-cart-id="${entry.item.id}">
-          <div class="cart-item-top">
-            <div class="cart-item-name">${entry.item.item_name}</div>
-            <button class="cart-remove" data-remove="${entry.item.id}">
-              ${renderIcon('close', 13)}
+        <div class="cart-item" data-cart-id="${entry.item.id}" style="
+          background:var(--bg-elevated);
+          border:1px solid var(--border);
+          border-radius:12px;padding:0.875rem;
+          margin-bottom:0.5rem;
+          transition:border-color 0.15s;
+          ${isLoss ? 'border-color:#FECACA;background:var(--red-50);' : ''}
+        ">
+          <!-- Row 1: Name + remove -->
+          <div style="display:flex;align-items:flex-start;
+            justify-content:space-between;gap:0.5rem;margin-bottom:0.625rem">
+            <div style="font-weight:600;font-size:0.9375rem;
+              color:var(--dark);flex:1;min-width:0;
+              line-height:1.3;">
+              ${entry.item.item_name}
+            </div>
+            <button class="cart-remove" data-remove="${entry.item.id}"
+              style="flex-shrink:0;margin-top:1px">
+              ${renderIcon('close', 12)}
             </button>
           </div>
-          <div class="cart-item-controls">
-            <div class="qty-control">
+
+          <!-- Row 2: Qty control -->
+          <div style="display:flex;align-items:center;
+            justify-content:space-between;gap:0.75rem;margin-bottom:0.625rem">
+            <div style="font-size:0.75rem;font-weight:600;
+              color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">
+              Qty
+            </div>
+            <div class="qty-control" style="flex-shrink:0">
               <button class="qty-btn" data-qty-dec="${entry.item.id}">−</button>
               <input type="number" class="qty-input" value="${entry.qty}"
                 min="0.01" step="0.01" data-qty-input="${entry.item.id}"
                 inputmode="decimal">
               <button class="qty-btn" data-qty-inc="${entry.item.id}">+</button>
             </div>
-            <div class="price-input-wrap">
-              <span class="price-prefix">ETB</span>
-              <input type="number" class="price-input ${isLoss?'price-loss':''}"
-                value="${entry.price}" min="0" step="0.01"
-                data-price-input="${entry.item.id}" inputmode="decimal">
+          </div>
+
+          <!-- Row 3: Unit price + line total side by side -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+            <div>
+              <div style="font-size:0.6875rem;font-weight:700;
+                color:${isLoss?'var(--danger)':'var(--muted)'};
+                text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px">
+                Unit Price
+              </div>
+              <div class="price-input-wrap">
+                <span class="price-prefix">ETB</span>
+                <input type="number"
+                  class="price-input ${isLoss?'price-loss':''}"
+                  value="${entry.price}"
+                  min="0" step="0.01"
+                  data-price-input="${entry.item.id}"
+                  inputmode="decimal">
+              </div>
             </div>
-            <div class="cart-line-total" data-total-id="${entry.item.id}">
-              ${fmt(entry.qty * entry.price)} ETB
+            <div>
+              <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+                text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px">
+                Total
+              </div>
+              <div data-total-id="${entry.item.id}" style="
+                height:38px;border-radius:8px;
+                background:var(--bg-subtle);border:1px solid var(--border);
+                display:flex;align-items:center;justify-content:flex-end;
+                padding:0 0.625rem;
+                font-size:0.9375rem;font-weight:700;
+                color:${isLoss?'var(--danger)':'var(--dark)'};
+              ">
+                ${fmt(total)} <span style="font-size:0.6875rem;font-weight:600;
+                  color:var(--muted);margin-left:3px">ETB</span>
+              </div>
             </div>
           </div>
+
           ${isLoss ? `
-            <div class="loss-warning">
-              ${renderIcon('alert',12)} Below cost (${fmt(cost)} ETB)
+            <div class="loss-warning" style="margin-top:0.5rem">
+              ${renderIcon('alert',11)} Below cost (${fmt(cost)} ETB)
             </div>
           ` : ''}
         </div>
@@ -1201,6 +1340,25 @@ export async function render(container) {
 
       if (onSuccess) onSuccess()
       showSaleSuccess(total, cart.length, sale.id)
+
+      // Check inventory resolution in background
+      const saleItemsForCheck = cart.map(e => ({
+        item_name_snapshot: e.item.item_name,
+        quantity:           e.qty,
+        unit_price:         e.price,
+      }))
+      const storeId = currentStore?.id
+
+      setTimeout(async () => {
+        const resolutions = await checkSaleAgainstInventory(saleItemsForCheck, storeId)
+        if (resolutions.length > 0) {
+          openInventoryResolverModal(resolutions, sale.id, () => {
+            // Refresh inventory after resolution
+            getInventory().then(fresh => { allItems = fresh || []; renderProducts() })
+          })
+        }
+      }, 1500) // wait 1.5s so success screen is visible first
+
       cart = []; renderCart(); renderProducts()
       invalidateAfterSale()
       const fresh = await getInventory()
@@ -1293,9 +1451,25 @@ function injectPOSStyles() {
   style.textContent = `
     @keyframes sale-pop { from{transform:scale(0.8);opacity:0} to{transform:scale(1);opacity:1} }
 
-    .pos-layout { display:grid;grid-template-columns:1fr 380px;gap:1.25rem;height:calc(100vh - 4rem);max-height:900px; }
+    .pos-layout {
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 1.25rem;
+      /* No fixed height — use min-height so it can grow */
+      min-height: calc(100vh - 6rem);
+      align-items: start;
+    }
     .pos-left { display:flex;flex-direction:column;min-height:0;overflow:hidden; }
-    .pos-right { display:flex;flex-direction:column;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm); }
+    .pos-right {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
 
     .pos-search-wrap { margin-bottom:0.875rem; }
     .pos-search-inner { display:flex;align-items:center;gap:0.5rem;background:var(--bg-elevated);border:1.5px solid var(--border);border-radius:var(--radius-lg);padding:0.5rem 0.875rem;transition:border-color 0.15s,box-shadow 0.15s; }
@@ -1314,26 +1488,12 @@ function injectPOSStyles() {
     .cat-chip.active { background:var(--teal-50);border-color:var(--accent);color:var(--accent); }
 
     .pos-products { flex:1;overflow-y:auto;padding-right:2px; }
-    .pos-products.grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.75rem;align-content:start; }
+    .pos-products.grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:0.875rem;align-content:start; }
     .pos-products.list { display:flex;flex-direction:column; }
     .products-empty { grid-column:1/-1;text-align:center;padding:3rem 1.5rem;display:flex;flex-direction:column;align-items:center; }
 
-    .product-card { background:var(--bg-elevated);border:1.5px solid var(--border);border-radius:var(--radius-lg);cursor:pointer;transition:all 0.18s;position:relative;overflow:hidden; }
-    .product-card:hover { border-color:var(--accent);box-shadow:var(--shadow-sm);transform:translateY(-2px); }
-    .product-card.in-cart { border-color:var(--accent);background:var(--teal-50); }
-    .product-card.out-of-stock { opacity:0.5;pointer-events:none; }
-    .product-card-inner { padding:0.875rem 0.75rem; }
-    .product-icon-wrap { width:36px;height:36px;background:var(--bg-subtle);border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:0.5rem; }
-    .product-card.in-cart .product-icon-wrap { background:var(--teal-50); }
-    .product-name { font-size:0.8125rem;font-weight:600;color:var(--dark);line-height:1.3;margin-bottom:2px; }
-    .product-cat { font-size:0.6875rem;color:var(--muted);margin-bottom:0.4rem; }
-    .product-price { font-size:0.9375rem;font-weight:700;color:var(--accent); }
-    .product-stock { font-size:0.6875rem;font-weight:600;margin-top:2px; }
-    .product-stock.ok { color:var(--success); }
-    .product-stock.out { color:var(--danger); }
-    .product-add-btn { position:absolute;bottom:0.5rem;right:0.5rem;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1);box-shadow:0 2px 6px rgba(13,148,136,0.3); }
-    .product-add-btn.added { background:var(--teal-50);border:1.5px solid var(--accent); }
-    .product-add-btn:hover { transform:scale(1.15); }
+    .product-card:hover { border-color:var(--accent) !important;box-shadow:var(--shadow-sm);transform:translateY(-2px); }
+    .product-add-btn:hover { transform:scale(1.15) !important; }
 
     .product-list { display:flex;flex-direction:column;gap:1px; }
     .product-row { display:flex;align-items:center;gap:0.75rem;padding:0.625rem 0.75rem;border-radius:var(--radius);cursor:pointer;transition:all 0.15s; }
@@ -1352,9 +1512,25 @@ function injectPOSStyles() {
     .product-row-add { width:26px;height:26px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s cubic-bezier(0.34,1.56,0.64,1); }
     .product-row-add.added { background:var(--teal-50);border:1.5px solid var(--accent); }
 
-    .pos-cart-header { display:flex;align-items:center;justify-content:space-between;padding:1rem 1.125rem;border-bottom:1px solid var(--border); }
+    .pos-cart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.125rem;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: var(--bg-elevated);
+      flex-shrink: 0;
+    }
     .cart-count { background:var(--accent);color:#fff;font-size:0.6875rem;font-weight:700;border-radius:999px;padding:1px 6px; }
-    .pos-cart-items { flex:1;overflow-y:auto;padding:0.75rem; }
+    .pos-cart-items {
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 0.75rem;
+      /* No flex:1 — let content determine height */
+    }
     .cart-empty { display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:160px;padding:2rem; }
     .cart-item { background:var(--bg-subtle);border-radius:var(--radius-lg);padding:0.75rem;margin-bottom:0.625rem;border:1px solid var(--border); }
     .cart-item-top { display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem; }
@@ -1375,7 +1551,11 @@ function injectPOSStyles() {
     .cart-line-total { font-size:0.875rem;font-weight:700;color:var(--dark);white-space:nowrap;min-width:70px;text-align:right; }
     .loss-warning { display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;color:var(--danger);margin-top:0.4rem;background:var(--red-50);padding:0.3rem 0.5rem;border-radius:var(--radius-sm); }
 
-    .pos-totals { padding:0.875rem 1.125rem;border-top:1px solid var(--border); }
+    .pos-totals {
+      padding: 0.875rem 1.125rem;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
     .total-row { display:flex;justify-content:space-between;align-items:center;padding:0.25rem 0;font-size:0.875rem; }
     .total-label { display:flex;align-items:center;gap:0.35rem;color:var(--muted); }
     .total-val { font-weight:600;color:var(--dark); }
@@ -1387,7 +1567,12 @@ function injectPOSStyles() {
     .profit-bar.ok   { background:var(--green-50);color:#15803D; }
     .profit-bar.low  { background:var(--amber-50);color:#92400E; }
     .profit-bar.loss { background:var(--red-50);  color:#991B1B; }
-    .pos-checkout { padding:0.875rem 1.125rem;border-top:1px solid var(--border);background:var(--bg-subtle);overflow-y:auto; }
+    .pos-checkout {
+      padding: 0.875rem 1.125rem 1.25rem;
+      border-top: 1px solid var(--border);
+      background: var(--bg-subtle);
+      flex-shrink: 0;
+    }
     .pay-methods { display:flex;gap:0.375rem;flex-wrap:wrap; }
     .pay-method-btn { padding:0.3rem 0.75rem;border-radius:var(--radius-pill);font-size:0.8125rem;font-weight:600;border:1.5px solid var(--border);background:var(--bg-elevated);color:var(--muted);cursor:pointer;transition:all 0.15s;white-space:nowrap; }
     .pay-method-btn:hover { border-color:var(--accent);color:var(--accent); }

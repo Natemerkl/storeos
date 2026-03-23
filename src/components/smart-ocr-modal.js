@@ -4,6 +4,8 @@ import { navigate } from '../router.js'
 import { renderIcon } from './icons.js'
 import { fuzzyMatch } from '../utils/fuzzy.js'
 import { audit } from '../utils/audit.js'
+import { checkSaleAgainstInventory } from '../utils/inventory-resolver.js'
+import { openInventoryResolverModal } from '../components/inventory-resolver-modal.js'
 
 let modalEl = null
 
@@ -407,6 +409,19 @@ export async function openSmartOCRModal(logId) {
         unit_price:         item.price || 0,
       })
     }
+
+    const saleItemsForCheck = valid.map(i => ({
+      item_name_snapshot: i.name,
+      quantity:           i.qty  || 1,
+      unit_price:         i.price || 0,
+    }))
+
+    setTimeout(async () => {
+      const resolutions = await checkSaleAgainstInventory(saleItemsForCheck, currentStore?.id)
+      if (resolutions.length > 0) {
+        openInventoryResolverModal(resolutions, sale.id)
+      }
+    }, 1500)
 
     if (isCredit && custName) {
       const { data: existing } = await supabase.from('customers')
