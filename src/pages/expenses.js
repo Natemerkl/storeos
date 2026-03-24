@@ -66,12 +66,13 @@ export async function render(container) {
               <th>Category</th>
               <th>Description</th>
               <th>Amount</th>
+              <th>Account</th>
               <th>Source</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="exp-body">
-            <tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr>
+            <tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr>
           </tbody>
         </table>
       </div>
@@ -100,8 +101,10 @@ export async function render(container) {
             <input class="form-input" id="f-category" placeholder="e.g. Rent, Utilities">
           </div>
           <div class="form-group">
-            <label class="form-label">Cash Account</label>
-            <select class="form-input" id="f-account"></select>
+            <label class="form-label">Paid from Account *</label>
+            <select class="form-input" id="f-account" required>
+              <option value="">— Select account —</option>
+            </select>
           </div>
         </div>
         <div class="form-group">
@@ -126,11 +129,14 @@ export async function render(container) {
   // Load cash accounts
   const { data: accounts } = await supabase
     .from('cash_accounts')
-    .select('id, name')
+    .select('id, name, account_type, balance')
     .in('store_id', storeIds)
 
   container.querySelector('#f-account').innerHTML =
-    (accounts || []).map(a => `<option value="${a.id}">${a.name}</option>`).join('')
+    '<option value="">— Select account —</option>' +
+    (accounts || []).map(a =>
+      `<option value="${a.id}">${a.account_type === 'bank' ? '🏦' : '🏪'} ${a.name} (${fmt(a.balance)} ETB)</option>`
+    ).join('')
 
   let allExpenses = []
   let editingId   = null
@@ -223,6 +229,9 @@ export async function render(container) {
         <td>${e.category ? `<span class="badge badge-grey">${e.category}</span>` : '—'}</td>
         <td>${e.description || '—'}</td>
         <td style="font-weight:600;color:var(--danger)">-${fmt(e.amount)} ETB</td>
+        <td><span class="badge ${e.cash_accounts?.account_type === 'bank' ? 'badge-blue' : 'badge-teal'}">
+          ${e.cash_accounts ? (e.cash_accounts.account_type === 'bank' ? '🏦 ' : '🏪 ') + e.cash_accounts.name : '—'}
+        </span></td>
         <td><span class="badge badge-grey">${e.source || 'manual'}</span></td>
         <td>
           <div style="display:flex;gap:0.4rem">
@@ -287,12 +296,14 @@ export async function render(container) {
   }
 
   async function saveExpense() {
-    const amount = Number(container.querySelector('#f-amount').value)
+    const amount    = Number(container.querySelector('#f-amount').value)
+    const accountId = container.querySelector('#f-account').value
     if (!amount || amount <= 0) { alert('Enter a valid amount'); return }
+    if (!accountId) { alert('Please select which account this expense came from'); return }
 
     const payload = {
       store_id:        currentStore?.id,
-      cash_account_id: container.querySelector('#f-account').value || null,
+      cash_account_id: accountId,
       expense_date:    container.querySelector('#f-date').value,
       amount,
       category:        container.querySelector('#f-category').value || null,
@@ -306,10 +317,22 @@ export async function render(container) {
       const { data: updatedExpense, error } = await supabase.from('expenses').update(payload).eq('id', editingId).select().single()
       if (error) { alert('Error updating expense'); console.error(error); return }
       if (updatedExpense) await audit.expenseUpdated(oldExpense, updatedExpense)
+
+      // Adjust balance: add back old amount, deduct new amount
+      if (oldExpense?.cash_account_id) {
+        const { data: oldAcc } = await supabase.from('cash_accounts').select('balance').eq('id', oldExpense.cash_account_id).single()
+        if (oldAcc) await supabase.from('cash_accounts').update({ balance: Number(oldAcc.balance) + Number(oldExpense.amount) }).eq('id', oldExpense.cash_account_id)
+      }
+      const { data: newAcc } = await supabase.from('cash_accounts').select('balance').eq('id', accountId).single()
+      if (newAcc) await supabase.from('cash_accounts').update({ balance: Number(newAcc.balance) - amount }).eq('id', accountId)
     } else {
       const { data: exp, error } = await supabase.from('expenses').insert(payload).select().single()
       if (error) { alert('Error saving expense'); console.error(error); return }
       if (exp) await audit.expenseCreated(exp)
+
+      // Deduct from cash account
+      const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', accountId).single()
+      if (acc) await supabase.from('cash_accounts').update({ balance: Number(acc.balance) - amount }).eq('id', accountId)
     }
 
     invalidateAfterExpense()

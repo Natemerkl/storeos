@@ -111,7 +111,7 @@ export async function getTransactions(forceRefresh = false) {
   }
   const [{ data: sales }, { data: expenses }] = await Promise.all([
     supabase.from('sales').select('*').in('store_id', storeIds()).order('sale_date', { ascending: false }).limit(200),
-    supabase.from('expenses').select('*').in('store_id', storeIds()).order('expense_date', { ascending: false }).limit(200),
+    supabase.from('expenses').select('*, cash_accounts(id,name,account_type)').in('store_id', storeIds()).order('expense_date', { ascending: false }).limit(200),
   ])
   const result = { sales: sales || [], expenses: expenses || [] }
   cache.set(key, result, 30)

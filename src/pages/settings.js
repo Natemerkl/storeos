@@ -21,6 +21,7 @@ export async function render(container) {
           { id:'ocr',      icon:'scan',        label:'OCR & Scanning'  },
           { id:'store',    icon:'store',        label:'Store Info'      },
           { id:'accounts', icon:'cash',         label:'Cash Accounts'   },
+          { id:'prefs',    icon:'reports',      label:'Preferences'     },
           { id:'tax',      icon:'accounting',   label:'Tax & VAT'       },
           { id:'danger',   icon:'alert',        label:'Danger Zone'     },
         ].map((item, i) => `
@@ -102,6 +103,7 @@ export async function render(container) {
     if (id === 'ocr')      await renderOCR()
     if (id === 'store')    await renderStore()
     if (id === 'accounts') await renderAccounts()
+    if (id === 'prefs')    await renderPreferences()
     if (id === 'tax')      await renderTax()
     if (id === 'danger')   await renderDanger()
   }
@@ -369,6 +371,7 @@ export async function render(container) {
               <tr>
                 <th>Account Name</th>
                 <th>Type</th>
+                <th>Bank Info</th>
                 <th>Store</th>
                 <th>Balance</th>
                 <th>Actions</th>
@@ -379,13 +382,17 @@ export async function render(container) {
                 <tr>
                   <td><strong>${a.name}</strong></td>
                   <td><span class="badge ${a.account_type==='till'?'badge-teal':'badge-blue'}">
-                    ${a.account_type === 'till' ? 'Till' : 'Bank'}
+                    ${a.account_type === 'till' ? '🏪 Till' : '🏦 Bank'}
                   </span></td>
+                  <td style="color:var(--muted);font-size:0.8125rem">
+                    ${a.account_type === 'bank' ? `${a.bank_name || '—'}<br><span style="font-family:monospace">${a.account_number || ''}</span>` : '—'}
+                  </td>
                   <td style="color:var(--muted)">${a.stores?.name || '—'}</td>
                   <td style="font-weight:700;color:var(--accent)">${fmt(a.balance)} ETB</td>
                   <td>
                     <button class="btn btn-outline btn-sm" data-edit-account="${a.id}"
-                      data-name="${a.name}" data-balance="${a.balance}">
+                      data-name="${a.name}" data-balance="${a.balance}"
+                      data-type="${a.account_type}" data-bank="${a.bank_name||''}" data-accnum="${a.account_number||''}">
                       Edit
                     </button>
                   </td>
@@ -407,14 +414,24 @@ export async function render(container) {
           </div>
           <div class="form-group">
             <label class="form-label">Account Name *</label>
-            <input class="form-input" id="acc-name" placeholder="e.g. CBE Account, Store 2 Till">
+            <input class="form-input" id="acc-name" placeholder="e.g. CBE Account, Store Till">
           </div>
           <div class="form-group">
             <label class="form-label">Type</label>
             <select class="form-input" id="acc-type">
-              <option value="till">Till (Cash in store)</option>
-              <option value="bank">Bank Account</option>
+              <option value="till">🏪 Till (Cash in store)</option>
+              <option value="bank">🏦 Bank Account</option>
             </select>
+          </div>
+          <div id="acc-bank-fields" style="display:none">
+            <div class="form-group">
+              <label class="form-label">Bank Name</label>
+              <input class="form-input" id="acc-bank-name" placeholder="e.g. Commercial Bank of Ethiopia">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Account Number</label>
+              <input class="form-input" id="acc-bank-num" placeholder="e.g. 1000123456789">
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Store</label>
@@ -436,20 +453,36 @@ export async function render(container) {
 
     let editingId = null
 
+    // Toggle bank fields
+    const accTypeEl = content.querySelector('#acc-type')
+    const bankFields = content.querySelector('#acc-bank-fields')
+    accTypeEl.addEventListener('change', () => {
+      bankFields.style.display = accTypeEl.value === 'bank' ? 'block' : 'none'
+    })
+
     content.querySelector('#btn-new-account').addEventListener('click', () => {
       editingId = null
-      content.querySelector('#acc-modal-title').textContent = 'Add Cash Account'
+      content.querySelector('#acc-modal-title').textContent = 'Add Account'
       content.querySelector('#acc-name').value    = ''
       content.querySelector('#acc-balance').value = '0'
+      content.querySelector('#acc-type').value    = 'till'
+      content.querySelector('#acc-bank-name').value = ''
+      content.querySelector('#acc-bank-num').value  = ''
+      bankFields.style.display = 'none'
       content.querySelector('#acc-modal').style.display = 'flex'
     })
 
     content.querySelectorAll('[data-edit-account]').forEach(btn => {
       btn.addEventListener('click', () => {
         editingId = btn.dataset.editAccount
+        const type = btn.dataset.type || 'till'
         content.querySelector('#acc-modal-title').textContent = 'Edit Account'
-        content.querySelector('#acc-name').value    = btn.dataset.name
-        content.querySelector('#acc-balance').value = btn.dataset.balance
+        content.querySelector('#acc-name').value      = btn.dataset.name
+        content.querySelector('#acc-balance').value   = btn.dataset.balance
+        content.querySelector('#acc-type').value      = type
+        content.querySelector('#acc-bank-name').value = btn.dataset.bank || ''
+        content.querySelector('#acc-bank-num').value  = btn.dataset.accnum || ''
+        bankFields.style.display = type === 'bank' ? 'block' : 'none'
         content.querySelector('#acc-modal').style.display = 'flex'
       })
     })
@@ -459,21 +492,84 @@ export async function render(container) {
     content.querySelector('#acc-cancel').addEventListener('click', closeModal)
 
     content.querySelector('#acc-save').addEventListener('click', async () => {
-      const name    = content.querySelector('#acc-name').value.trim()
-      const type    = content.querySelector('#acc-type').value
-      const storeId = content.querySelector('#acc-store').value
-      const balance = Number(content.querySelector('#acc-balance').value) || 0
+      const name       = content.querySelector('#acc-name').value.trim()
+      const type       = content.querySelector('#acc-type').value
+      const storeId    = content.querySelector('#acc-store').value
+      const balance    = Number(content.querySelector('#acc-balance').value) || 0
+      const bankName   = content.querySelector('#acc-bank-name').value.trim() || null
+      const bankNum    = content.querySelector('#acc-bank-num').value.trim()  || null
       if (!name) { alert('Name required'); return }
 
+      const payload = { name, account_type: type, balance, bank_name: bankName, account_number: bankNum }
+
       if (editingId) {
-        await supabase.from('cash_accounts').update({ name, balance }).eq('id', editingId)
+        await supabase.from('cash_accounts').update(payload).eq('id', editingId)
       } else {
-        await supabase.from('cash_accounts').insert({ store_id: storeId, name, account_type: type, balance })
+        await supabase.from('cash_accounts').insert({ store_id: storeId, ...payload })
       }
       closeModal()
       showToast(editingId ? 'Account updated' : 'Account added', 'success')
       await renderAccounts()
     })
+  }
+
+  // ── PREFERENCES ───────────────────────────────────────────────
+  async function renderPreferences() {
+    const currentFmt = localStorage.getItem('storeos_date_format') || 'en'
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:1rem">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:1.25rem;display:flex;align-items:center;gap:0.5rem">
+          ${renderIcon('reports', 18)} Display Preferences
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Date Format</div>
+            <div class="setting-sub">Choose how dates are shown throughout the app</div>
+          </div>
+          <div style="display:flex;gap:0.5rem">
+            <button id="fmt-en" class="btn ${currentFmt === 'en' ? 'btn-primary' : 'btn-outline'} btn-sm">
+              📅 Gregorian
+            </button>
+            <button id="fmt-et" class="btn ${currentFmt === 'et' ? 'btn-primary' : 'btn-outline'} btn-sm">
+              🇪🇹 Ethiopian (Amharic)
+            </button>
+          </div>
+        </div>
+
+        <div id="date-preview" style="
+          margin-top:0.75rem;padding:0.75rem 1rem;
+          background:var(--bg-subtle);border-radius:var(--radius);
+          font-size:0.875rem;color:var(--muted);
+        ">
+          Loading preview...
+        </div>
+      </div>
+    `
+
+    // Dynamic import to keep this lazy
+    const { formatDate, setDateFormat } = await import('../utils/format-date.js')
+
+    function updatePreview() {
+      const fmt = localStorage.getItem('storeos_date_format') || 'en'
+      const sampleDate = new Date()
+      const preview = formatDate(sampleDate)
+      content.querySelector('#date-preview').innerHTML = `
+        <strong>Today looks like:</strong> 
+        <span style="color:var(--dark);font-weight:600">${preview}</span>
+      `
+      content.querySelector('#fmt-en').className = `btn ${fmt === 'en' ? 'btn-primary' : 'btn-outline'} btn-sm`
+      content.querySelector('#fmt-et').className = `btn ${fmt === 'et' ? 'btn-primary' : 'btn-outline'} btn-sm`
+    }
+
+    content.querySelector('#fmt-en').addEventListener('click', () => {
+      setDateFormat('en'); updatePreview(); showToast('Date format: Gregorian', 'success')
+    })
+    content.querySelector('#fmt-et').addEventListener('click', () => {
+      setDateFormat('et'); updatePreview(); showToast('Date format: Ethiopian', 'success')
+    })
+
+    updatePreview()
   }
 
   // ── TAX & VAT ──────────────────────────────────────────────

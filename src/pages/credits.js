@@ -483,7 +483,10 @@ export async function render(container) {
       const salesCount  = (c.credit_sales||[]).length
       return `
         <tr>
-          <td><div style="font-weight:600">${c.name}</div></td>
+          <td>
+            <div style="font-weight:600">${c.name}</div>
+            ${c.plate_number ? `<div style="font-size:0.75rem;color:var(--muted);font-family:monospace;margin-top:2px">🚗 ${c.plate_number}</div>` : ''}
+          </td>
           <td style="color:var(--muted)">${c.phone || '—'}</td>
           <td>${fmt(totalCredit)} ETB</td>
           <td style="font-weight:700;color:${outstanding > 0 ? 'var(--warning)' : 'var(--accent)'}">
@@ -491,7 +494,7 @@ export async function render(container) {
           </td>
           <td>${salesCount} credit sale${salesCount !== 1 ? 's' : ''}</td>
           <td>
-            <div style="display:flex;gap:0.4rem">
+            <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
               <button class="btn btn-primary btn-sm" data-action="lend-cash" data-id="${c.id}" data-name="${c.name}">
                 + Lend
               </button>
@@ -499,6 +502,9 @@ export async function render(container) {
               <button class="btn btn-outline btn-sm" style="color:var(--accent);border-color:var(--accent)" data-action="pay-customer" data-id="${c.id}" data-name="${c.name}">
                 Pay
               </button>` : ''}
+              <button class="btn btn-outline btn-sm" data-action="plate-history" data-id="${c.id}" data-name="${c.name}" data-plate="${c.plate_number||''}">
+                🚗 Plate
+              </button>
               <button class="btn btn-outline btn-sm" data-action="view-cust-history" data-id="${c.id}" data-name="${c.name}">
                 History
               </button>
@@ -516,6 +522,9 @@ export async function render(container) {
     el.querySelectorAll('[data-action="lend-cash"]').forEach(btn => {
       btn.addEventListener('click', () => openLendModal(btn.dataset.id, btn.dataset.name))
     })
+    el.querySelectorAll('[data-action="plate-history"]').forEach(btn => {
+      btn.addEventListener('click', () => openPlateModal(btn.dataset.id, btn.dataset.name, btn.dataset.plate))
+    })
     el.querySelectorAll('[data-action="pay-customer"]').forEach(btn => {
       btn.addEventListener('click', () => {
         const tabBtn = container.querySelector('.tab-btn[data-tab="receivable"]')
@@ -531,6 +540,97 @@ export async function render(container) {
     })
   }
 
+  // ── Plate History Modal ───────────────────────────────
+  async function openPlateModal(entityId, entityName, currentPlate) {
+    // Load history from generic plate_history table
+    const { data: history } = await supabase
+      .from('plate_history')
+      .select('*')
+      .eq('entity_type', 'customer')
+      .eq('entity_id', entityId)
+      .order('changed_at', { ascending: false })
+      .limit(10)
+
+    const overlay = document.createElement('div')
+    overlay.className = 'modal-overlay'
+    overlay.style.display = 'flex'
+
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+          <div class="modal-title">🚗 Plate Numbers — ${entityName}</div>
+          <button class="modal-close" id="plate-close">✕</button>
+        </div>
+
+        <div style="margin-bottom:1rem">
+          <div style="font-size:0.8125rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.4px">Current Plate</div>
+          <div style="font-size:1.5rem;font-weight:800;font-family:monospace;color:var(--dark);letter-spacing:2px">
+            ${currentPlate || '— None saved'}
+          </div>
+        </div>
+
+        <div style="font-size:0.8125rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.4px">Update Plate Number</div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:1.25rem">
+          <input class="form-input" id="new-plate" placeholder="e.g. AA 12345" style="font-family:monospace;font-weight:700;letter-spacing:1px;text-transform:uppercase">
+          <input class="form-input" id="plate-notes" placeholder="Note (optional)" style="flex:1.5">
+          <button class="btn btn-primary" id="plate-save">Save</button>
+        </div>
+
+        <div style="font-size:0.8125rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.4px">History</div>
+        <div style="max-height:240px;overflow-y:auto">
+          ${(history||[]).length === 0
+            ? '<div class="empty"><div class="empty-text">No plate history yet</div></div>'
+            : (history||[]).map(h => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border)">
+                <div>
+                  <div style="font-family:monospace;font-weight:700;font-size:1rem;letter-spacing:1px">${h.plate_number}</div>
+                  ${h.notes ? `<div style="font-size:0.75rem;color:var(--muted)">${h.notes}</div>` : ''}
+                </div>
+                <div style="font-size:0.75rem;color:var(--muted);text-align:right">
+                  ${new Date(h.changed_at).toLocaleString('en-ET', { dateStyle:'medium', timeStyle:'short' })}
+                </div>
+              </div>
+            `).join('')
+          }
+        </div>
+      </div>
+    `
+
+    document.body.appendChild(overlay)
+
+    // Auto-uppercase plate input
+    overlay.querySelector('#new-plate').addEventListener('input', e => {
+      e.target.value = e.target.value.toUpperCase()
+    })
+
+    overlay.querySelector('#plate-close').addEventListener('click', () => overlay.remove())
+
+    overlay.querySelector('#plate-save').addEventListener('click', async () => {
+      const newPlate = overlay.querySelector('#new-plate').value.trim().toUpperCase()
+      const notes    = overlay.querySelector('#plate-notes').value.trim() || null
+      if (!newPlate) { alert('Enter a plate number'); return }
+
+      const saveBtn = overlay.querySelector('#plate-save')
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving...'
+
+      // Insert history record
+      await supabase.from('plate_history').insert({
+        entity_type:  'customer',
+        entity_id:    entityId,
+        plate_number: newPlate,
+        notes,
+      })
+
+      // Update snapshot on customer record
+      await supabase.from('customers').update({ plate_number: newPlate }).eq('id', entityId)
+
+      overlay.remove()
+      showToast(`Plate updated to ${newPlate}`, 'success')
+      loadTab() // Refresh list
+    })
+  }
+
+  // ── Lend Modal ──────────────────────────────────────────────
   function openLendModal(customerId, customerName) {
     const overlay = document.createElement('div')
     overlay.className = 'modal-overlay'
@@ -821,3 +921,13 @@ async function loadAccounts(storeIds) {
 function fmt(n) {
   return Number(n||0).toLocaleString('en-ET', { minimumFractionDigits:2, maximumFractionDigits:2 })
 }
+
+function showToast(msg, type = 'info') {
+  const t = document.createElement('div')
+  t.className = `toast toast-${type}`
+  t.textContent = msg
+  let wrap = document.querySelector('.toast-container')
+  if (!wrap) { wrap = document.createElement('div'); wrap.className = 'toast-container'; document.body.appendChild(wrap) }
+  wrap.appendChild(t)
+  setTimeout(() => t.remove(), 3000)
+}
