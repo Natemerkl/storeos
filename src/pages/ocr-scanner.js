@@ -276,44 +276,76 @@ export async function render(container) {
       if (ocrError) throw new Error(ocrError.message || 'OCR failed')
       if (ocrResult?.error) throw new Error(ocrResult.error)
 
-      showProgress('Preparing Smart Review...')
+      const processFinalFlow = async (finalParsedData, finalLogId) => {
+        showProgress('Preparing Smart Review...')
+        
+        if (!finalLogId && currentStore?.id) {
+          const { data: logData, error: logError } = await supabase
+            .from('ocr_logs')
+            .insert({
+              store_id:    currentStore?.id,
+              image_url:   publicUrl,
+              raw_text:    ocrResult.raw_text || '',
+              parsed_data: finalParsedData,
+              status:      'pending',
+            }).select('id').single()
+          if (logError) throw logError
+          finalLogId = logData?.id
+        }
 
-      // 4. Save OCR log if not already saved by Edge Function
-      let logId = ocrResult?.id
+        if (!finalLogId) throw new Error('Could not create scan record')
 
-      if (!logId && currentStore?.id) {
-        const { data: logData, error: logError } = await supabase
-          .from('ocr_logs')
-          .insert({
-            store_id:    currentStore?.id,
-            image_url:   publicUrl,
-            raw_text:    ocrResult?.raw_text    || '',
-            parsed_data: ocrResult?.parsed_data || { line_items: [] },
-            status:      'pending',
-          })
-          .select('id').single()
+        hideProgress()
+        selectedFile = null
+        container.querySelector('#preview-section').style.display = 'none'
+        dropZone.style.display = 'block'
+        fileInput.value = ''
 
-        if (logError) throw logError
-        logId = logData?.id
+        await openSmartOCRModal(finalLogId)
+        loadRecentScans()
       }
 
-      if (!logId) throw new Error('Could not create scan record')
+      const parsedData = ocrResult?.parsed_data || { line_items: [] }
+      let logId = ocrResult?.id
 
-      // 5. Hide progress — open Smart OCR modal
-      hideProgress()
-
-      // Reset file state BEFORE opening modal
-      // This prevents "stuck in loading" if user closes modal and comes back
-      selectedFile = null
-      container.querySelector('#preview-section').style.display = 'none'
-      dropZone.style.display = 'block'
-      fileInput.value = ''
-
-      // Open modal
-      await openSmartOCRModal(logId)
-
-      // Refresh recent scans after modal closes
-      loadRecentScans()
+      if (parsedData.column_detection?.needs_review) {
+        hideProgress()
+        const { openColumnCorrectionModal } = await import('../components/column-correction-modal.js')
+        openColumnCorrectionModal({
+          imageUrl: publicUrl,
+          columns: parsedData.column_detection.columns,
+          rawText: ocrResult.raw_text,
+          onSave: async (orderedTypes) => {
+            showProgress('Re-processing with corrected columns...')
+            try {
+              const { data: finalResult, error: finalError } = await supabase.functions.invoke('ocr-proxy', {
+                body: {
+                  imageUrl: publicUrl,
+                  storeId: currentStore?.id || 'onboarding',
+                  manual_column_order: orderedTypes
+                }
+              })
+              if (finalError) throw new Error(finalError.message)
+              if (finalResult?.error) throw new Error(finalResult.error)
+              
+              const finalLogId = finalResult?.id || logId
+              await processFinalFlow(finalResult.parsed_data, finalLogId)
+            } catch (err) {
+              console.error(err)
+              showToast('Correction failed: ' + err.message, 'error')
+            }
+          },
+          onRescan: () => {
+             selectedFile = null
+             isScanning = false
+             container.querySelector('#preview-section').style.display = 'none'
+             dropZone.style.display = 'block'
+             fileInput.value = ''
+          }
+        })
+      } else {
+        await processFinalFlow(parsedData, logId)
+      }
 
     } catch(err) {
       console.error('Scan error:', err)

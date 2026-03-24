@@ -137,41 +137,39 @@ export async function openSmartOCRModal(logId) {
           </div>
         </div>
 
-        <!-- Payment (sale only) -->
-        ${mode==='sale'?`
-          <div style="margin-bottom:1rem">
-            <label class="form-label">Payment</label>
-            <div style="display:flex;gap:0.375rem;flex-wrap:wrap;margin-top:0.375rem">
-              ${['cash','credit','bank_transfer','telebirr','cbe_birr','other'].map(pm=>`
-                <button data-pay="${pm}" class="pay-btn" style="
-                  padding:0.3rem 0.75rem;border-radius:var(--radius-pill);
-                  font-size:0.8125rem;font-weight:600;cursor:pointer;
-                  border:1.5px solid ${payMethod===pm?'var(--accent)':'var(--border)'};
-                  background:${payMethod===pm?'var(--teal-50)':'var(--bg-elevated)'};
-                  color:${payMethod===pm?'var(--accent)':'var(--muted)'};
-                ">${PAY_LABELS[pm]||pm}</button>
-              `).join('')}
-            </div>
+        <!-- Payment (all modes) -->
+        <div style="margin-bottom:1rem">
+          <label class="form-label">Payment</label>
+          <div style="display:flex;gap:0.375rem;flex-wrap:wrap;margin-top:0.375rem">
+            ${['cash','credit','bank_transfer','telebirr','cbe_birr','other'].map(pm=>`
+              <button data-pay="${pm}" class="pay-btn" style="
+                padding:0.3rem 0.75rem;border-radius:var(--radius-pill);
+                font-size:0.8125rem;font-weight:600;cursor:pointer;
+                border:1.5px solid ${payMethod===pm?'var(--accent)':'var(--border)'};
+                background:${payMethod===pm?'var(--teal-50)':'var(--bg-elevated)'};
+                color:${payMethod===pm?'var(--accent)':'var(--muted)'};
+              ">${PAY_LABELS[pm]||pm}</button>
+            `).join('')}
           </div>
-          <div style="margin-bottom:1rem">
-            <details>
-              <summary style="font-size:0.8125rem;color:var(--muted);cursor:pointer">
-                ▶ + Customer info (optional)
-              </summary>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
-                <div>
-                  <label class="form-label">Name</label>
-                  <input class="form-input" id="ocr-cust-name" placeholder="Optional" list="ocr-cl">
-                  <datalist id="ocr-cl">${(customers||[]).map(c=>`<option value="${c.name}">`).join('')}</datalist>
-                </div>
-                <div>
-                  <label class="form-label">Phone</label>
-                  <input class="form-input" id="ocr-cust-phone" placeholder="Optional">
-                </div>
+        </div>
+        <div style="margin-bottom:1rem">
+          <details ${payMethod === 'credit' ? 'open' : ''}>
+            <summary style="font-size:0.8125rem;color:var(--muted);cursor:pointer;font-weight:500;">
+              ▶ + ${mode === 'sale' ? 'Customer' : 'Vendor'} info ${payMethod === 'credit' ? '<span style="color:var(--danger)">(Required for credit)</span>' : '(Optional)'}
+            </summary>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
+              <div>
+                <label class="form-label">${mode === 'sale' ? 'Name' : 'Vendor Name'}</label>
+                <input class="form-input" id="ocr-partner-name" placeholder="${payMethod === 'credit' ? 'Required' : 'Optional'}" list="${mode === 'sale' ? 'ocr-cl' : ''}">
+                ${mode === 'sale' ? `<datalist id="ocr-cl">${(customers||[]).map(c=>`<option value="${c.name}">`).join('')}</datalist>` : ''}
               </div>
-            </details>
-          </div>
-        `:''}
+              <div>
+                <label class="form-label">Phone</label>
+                <input class="form-input" id="ocr-partner-phone" placeholder="Optional">
+              </div>
+            </div>
+          </details>
+        </div>
 
         <!-- Line items header -->
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
@@ -347,6 +345,15 @@ export async function openSmartOCRModal(logId) {
     const valid = items.filter(i => i.name?.trim())
     if (!valid.length) { showToast('Add at least one item','error'); return }
 
+    const isCredit = payMethod === 'credit'
+    const partnerName = modal.querySelector('#ocr-partner-name')?.value?.trim()
+    const partnerPhone = modal.querySelector('#ocr-partner-phone')?.value?.trim()
+
+    if (isCredit && !partnerName) {
+      showToast(`${mode === 'sale' ? 'Customer' : 'Vendor'} Name is required for credit transactions`, 'error')
+      return
+    }
+
     const btn = modal.querySelector('#ocr-submit')
     btn.textContent = 'Saving...'
     btn.disabled    = true
@@ -357,17 +364,17 @@ export async function openSmartOCRModal(logId) {
 
     try {
       if (mode === 'sale') {
-        await doSale(valid, date, accId, totalAmt)
+        await doSale(valid, date, accId, totalAmt, isCredit, partnerName, partnerPhone)
       } else if (mode === 'expense') {
-        await doExpense(valid, date, accId, totalAmt)
+        await doExpense(valid, date, accId, totalAmt, isCredit, partnerName, partnerPhone)
       } else {
-        await doInventory(valid)
+        await doInventory(valid, date, accId, totalAmt, isCredit, partnerName, partnerPhone)
       }
 
       await supabase.from('ocr_logs').update({
         status:            'applied',
         destination_table: mode==='inventory'?'inventory_items':mode,
-        user_edited_data:  { items:valid, date, totalAmt, mode },
+        user_edited_data:  { items:valid, date, totalAmt, mode, partnerName },
       }).eq('id', logId)
 
       try { await audit.action('ocr_applied', { logId, mode, totalAmt }) } catch(_){}
@@ -384,11 +391,7 @@ export async function openSmartOCRModal(logId) {
     }
   }
 
-  async function doSale(valid, date, accId, totalAmt) {
-    const isCredit  = payMethod === 'credit'
-    const custName  = modal.querySelector('#ocr-cust-name')?.value?.trim()
-    const custPhone = modal.querySelector('#ocr-cust-phone')?.value?.trim()
-
+  async function doSale(valid, date, accId, totalAmt, isCredit, custName, custPhone) {
     const { data: sale, error } = await supabase.from('sales').insert({
       store_id:        currentStore?.id,
       cash_account_id: isCredit ? null : (accId||null),
@@ -423,7 +426,7 @@ export async function openSmartOCRModal(logId) {
       }
     }, 1500)
 
-    if (isCredit && custName) {
+    if (custName) {
       const { data: existing } = await supabase.from('customers')
         .select('id').eq('store_id', currentStore?.id).ilike('name', custName).maybeSingle()
 
@@ -435,7 +438,7 @@ export async function openSmartOCRModal(logId) {
         custId = nc?.id
       }
 
-      if (custId) {
+      if (isCredit && custId) {
         await supabase.from('credit_sales').insert({
           store_id: currentStore?.id, sale_id: sale.id,
           customer_id: custId, amount_owed: totalAmt, status: 'unpaid',
@@ -444,10 +447,10 @@ export async function openSmartOCRModal(logId) {
     }
   }
 
-  async function doExpense(valid, date, accId, totalAmt) {
+  async function doExpense(valid, date, accId, totalAmt, isCredit, vendorName, vendorPhone) {
     const { error } = await supabase.from('expenses').insert({
       store_id:        currentStore?.id,
-      cash_account_id: accId||null,
+      cash_account_id: isCredit ? null : (accId||null),
       expense_date:    date,
       amount:          totalAmt,
       description:     valid.map(i=>i.name).join(', '),
@@ -455,9 +458,20 @@ export async function openSmartOCRModal(logId) {
       ocr_log_id:      logId,
     })
     if (error) throw error
+
+    if (isCredit && vendorName) {
+      await supabase.from('vendor_debts').insert({
+        store_id: currentStore?.id,
+        vendor_name: vendorName,
+        amount_owed: totalAmt,
+        amount_paid: 0,
+        status: 'unpaid',
+        notes: 'Expense logged from OCR scanner'
+      })
+    }
   }
 
-  async function doInventory(valid) {
+  async function doInventory(valid, date, accId, totalAmt, isCredit, vendorName, vendorPhone) {
     for (const item of valid) {
       const { error } = await supabase.from('inventory_items').insert({
         store_id:      currentStore?.id,
@@ -465,8 +479,30 @@ export async function openSmartOCRModal(logId) {
         quantity:      item.qty   || 0,
         unit_cost:     item.price || null,
         selling_price: item.price || null,
+        supplier:      vendorName || null,
       })
       if (error) throw error
+    }
+
+    if (isCredit && vendorName) {
+      await supabase.from('vendor_debts').insert({
+        store_id: currentStore?.id,
+        vendor_name: vendorName,
+        amount_owed: totalAmt,
+        amount_paid: 0,
+        status: 'unpaid',
+        notes: 'Inventory Purchase logged from OCR scanner'
+      })
+    } else if (accId && !isCredit && totalAmt > 0) {
+      await supabase.from('expenses').insert({
+        store_id: currentStore?.id,
+        cash_account_id: accId,
+        expense_date: date,
+        amount: totalAmt,
+        description: ('Inventory Purchase' + (vendorName ? ' from ' + vendorName : '')).trim(),
+        source: 'ocr',
+        ocr_log_id: logId,
+      })
     }
   }
 
