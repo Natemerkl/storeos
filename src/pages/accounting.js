@@ -19,7 +19,7 @@ export async function render(container) {
     </div>
 
     <!-- Tab bar -->
-    <div style="display:flex;gap:0;margin-bottom:1.5rem;border-bottom:2px solid var(--border)">
+    <div class="tab-bar" style="display:flex;gap:0;margin-bottom:1.5rem;border-bottom:2px solid var(--border)">
       ${[
         { id:'pl',      label:'📊 P&L Statement'     },
         { id:'bs',      label:'⚖️ Balance Sheet'      },

@@ -795,6 +795,13 @@ export async function render(container) {
                 ${fmt(total)} <span style="font-size:0.6875rem;font-weight:600;
                   color:var(--muted);margin-left:3px">ETB</span>
               </div>
+              <div data-margin-id="${entry.item.id}" style="font-size:0.75rem;font-weight:600;margin-top:4px;text-align:right">
+                ${(()=>{
+                  const p = total - (entry.qty*cost);
+                  const m = total > 0 ? (p/total*100) : 0;
+                  return p < 0 ? `<span style="color:var(--danger)">${fmt(p)} ETB (${m.toFixed(1)}%)</span>` : `<span style="color:#15803D">+${fmt(p)} ETB (${m.toFixed(1)}%)</span>`;
+                })()}
+              </div>
             </div>
           </div>
 
@@ -869,7 +876,15 @@ export async function render(container) {
     const entry   = cart.find(c => c.item.id === itemId)
     if (!entry) return
     const totalEl = container.querySelector(`[data-total-id="${itemId}"]`)
-    if (totalEl) totalEl.textContent = fmt(entry.qty * entry.price) + ' ETB'
+    const cost    = Number(entry.item.unit_cost) || 0
+    const total   = entry.qty * entry.price
+    if (totalEl) totalEl.textContent = fmt(total) + ' ETB'
+    const marginEl = container.querySelector(`[data-margin-id="${itemId}"]`)
+    if (marginEl) {
+      const p = total - (entry.qty * cost)
+      const m = total > 0 ? (p/total*100) : 0
+      marginEl.innerHTML = p < 0 ? `<span style="color:var(--danger)">${fmt(p)} ETB (${m.toFixed(1)}%)</span>` : `<span style="color:#15803D">+${fmt(p)} ETB (${m.toFixed(1)}%)</span>`
+    }
   }
 
   function updateDesktopTotals() {
@@ -889,10 +904,10 @@ export async function render(container) {
     if (pb) {
       if (profit < 0) {
         pb.className = 'profit-bar loss'
-        pb.innerHTML = `${renderIcon('alert',13)} Net loss of ${fmt(Math.abs(profit))} ETB`
+        pb.innerHTML = `${renderIcon('alert',13)} Net loss of ${fmt(Math.abs(profit))} ETB (${margin.toFixed(1)}%)`
       } else if (margin < 10) {
         pb.className = 'profit-bar low'
-        pb.innerHTML = `${renderIcon('alert',13)} Low margin — ${margin.toFixed(1)}%`
+        pb.innerHTML = `${renderIcon('alert',13)} Low margin: ${margin.toFixed(1)}% — ${fmt(profit)} ETB`
       } else {
         pb.className = 'profit-bar ok'
         pb.innerHTML = `${renderIcon('check',13)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB`
@@ -1021,6 +1036,13 @@ export async function render(container) {
                   padding:0 6px;text-align:center;">
                 ${fmt(total)}
               </div>
+              <div data-sheet-margin="${entry.item.id}" style="font-size:0.6875rem;font-weight:600;margin-top:2px;text-align:center">
+                ${(()=>{
+                  const p = total - (entry.qty*cost);
+                  const m = total > 0 ? (p/total*100) : 0;
+                  return p < 0 ? `<span style="color:var(--danger)">${fmt(p)} ETB (${m.toFixed(0)}%)</span>` : `<span style="color:#15803D">+${fmt(p)} ETB (${m.toFixed(0)}%)</span>`;
+                })()}
+              </div>
             </div>
           </div>
 
@@ -1110,6 +1132,13 @@ export async function render(container) {
     const total   = entry.qty * entry.price
     const totalEl = document.querySelector(`[data-sheet-total="${itemId}"]`)
     if (totalEl) totalEl.textContent = fmt(total)
+    const marginEl = document.querySelector(`[data-sheet-margin="${itemId}"]`)
+    if (marginEl) {
+      const cost = Number(entry.item.unit_cost) || 0
+      const p = total - (entry.qty * cost)
+      const m = total > 0 ? (p/total*100) : 0
+      marginEl.innerHTML = p < 0 ? `<span style="color:var(--danger)">${fmt(p)} ETB (${m.toFixed(0)}%)</span>` : `<span style="color:#15803D">+${fmt(p)} ETB (${m.toFixed(0)}%)</span>`
+    }
   }
 
   function updateSheetTotals() {
@@ -1130,15 +1159,15 @@ export async function render(container) {
       if (profit < 0) {
         pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
           font-weight:600;color:#991B1B;background:var(--red-50);padding:6px 8px;
-          border-radius:8px;">${renderIcon('alert',12)} Net loss of ${fmt(Math.abs(profit))} ETB</div>`
+          border-radius:8px;">${renderIcon('alert',12)} Net loss of ${fmt(Math.abs(profit))} ETB (${margin.toFixed(1)}%)</div>`
       } else if (margin < 10) {
         pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
           font-weight:600;color:#92400E;background:var(--amber-50);padding:6px 8px;
-          border-radius:8px;">${renderIcon('alert',12)} Low margin — ${margin.toFixed(1)}%</div>`
+          border-radius:8px;">${renderIcon('alert',12)} Low margin: ${margin.toFixed(1)}% — ${fmt(profit)} ETB</div>`
       } else {
         pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
           font-weight:600;color:#15803D;background:var(--green-50);padding:6px 8px;
-          border-radius:8px;">${renderIcon('check',12)} ${margin.toFixed(1)}% margin</div>`
+          border-radius:8px;">${renderIcon('check',12)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB</div>`
       }
     }
   }

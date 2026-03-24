@@ -8,6 +8,8 @@ export async function render(container) {
   const { currentStore, accountingView, stores } = appStore.getState()
   const storeIds = accountingView === 'joint' ? stores.map(s => s.id) : [currentStore?.id]
 
+  await loadAccounts(storeIds)
+
   container.innerHTML = `
     <div class="page-header">
       <div>
@@ -489,9 +491,18 @@ export async function render(container) {
           </td>
           <td>${salesCount} credit sale${salesCount !== 1 ? 's' : ''}</td>
           <td>
-            <button class="btn btn-outline btn-sm" data-action="view-cust-history" data-id="${c.id}" data-name="${c.name}">
-              View History
-            </button>
+            <div style="display:flex;gap:0.4rem">
+              <button class="btn btn-primary btn-sm" data-action="lend-cash" data-id="${c.id}" data-name="${c.name}">
+                + Lend
+              </button>
+              ${outstanding > 0 ? `
+              <button class="btn btn-outline btn-sm" style="color:var(--accent);border-color:var(--accent)" data-action="pay-customer" data-id="${c.id}" data-name="${c.name}">
+                Pay
+              </button>` : ''}
+              <button class="btn btn-outline btn-sm" data-action="view-cust-history" data-id="${c.id}" data-name="${c.name}">
+                History
+              </button>
+            </div>
           </td>
         </tr>
       `
@@ -501,6 +512,106 @@ export async function render(container) {
   function attachCustomerActions(el) {
     el.querySelectorAll('[data-action="view-cust-history"]').forEach(btn => {
       btn.addEventListener('click', () => openCustomerHistory(btn.dataset.id, btn.dataset.name))
+    })
+    el.querySelectorAll('[data-action="lend-cash"]').forEach(btn => {
+      btn.addEventListener('click', () => openLendModal(btn.dataset.id, btn.dataset.name))
+    })
+    el.querySelectorAll('[data-action="pay-customer"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tabBtn = container.querySelector('.tab-btn[data-tab="receivable"]')
+        if (tabBtn) tabBtn.click()
+        setTimeout(() => {
+          const searchInput = container.querySelector('#search-credits')
+          if (searchInput) {
+            searchInput.value = btn.dataset.name
+            searchInput.dispatchEvent(new Event('input'))
+          }
+        }, 100)
+      })
+    })
+  }
+
+  function openLendModal(customerId, customerName) {
+    const overlay = document.createElement('div')
+    overlay.className = 'modal-overlay'
+    overlay.style.display = 'flex'
+
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Lend to ${customerName}</div>
+          <button class="modal-close" id="lend-close">✕</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Amount Lent (ETB) *</label>
+          <input type="number" class="form-input" id="lend-amount" placeholder="0.00" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <select class="form-input" id="lend-type">
+            <option value="product">Product/Goods Loan</option>
+            <option value="cash">Cash Loan (deducts from account)</option>
+          </select>
+        </div>
+        <div class="form-group" id="lend-account-group" style="display:none">
+          <label class="form-label">Cash Account to Deduct From</label>
+          <select class="form-input" id="lend-account">
+            ${(accounts||[]).map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Notes</label>
+          <input class="form-input" id="lend-notes" placeholder="e.g. borrowed 500 ETB cash">
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem">
+          <button class="btn btn-outline" id="lend-cancel">Cancel</button>
+          <button class="btn btn-primary" id="lend-save">✓ Save Loan</button>
+        </div>
+      </div>
+    `
+    document.body.appendChild(overlay)
+
+    overlay.querySelector('#lend-type').addEventListener('change', e => {
+      overlay.querySelector('#lend-account-group').style.display = e.target.value === 'cash' ? 'block' : 'none'
+    })
+
+    const close = () => overlay.remove()
+    overlay.querySelector('#lend-close').addEventListener('click', close)
+    overlay.querySelector('#lend-cancel').addEventListener('click', close)
+
+    overlay.querySelector('#lend-save').addEventListener('click', async () => {
+      const amount = Number(overlay.querySelector('#lend-amount').value)
+      const type = overlay.querySelector('#lend-type').value
+      const accountId = overlay.querySelector('#lend-account').value
+      const notes = overlay.querySelector('#lend-notes').value.trim()
+
+      if (!amount || amount <= 0) { alert('Enter valid amount'); return }
+      const saveBtn = overlay.querySelector('#lend-save')
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving...'
+
+      const currentStore = appStore.getState().currentStore
+      const { error: creditErr } = await supabase.from('credit_sales').insert({
+        store_id: currentStore?.id,
+        customer_id: customerId,
+        amount_owed: amount,
+        amount_paid: 0,
+        status: 'unpaid'
+      })
+
+      if (creditErr) {
+        alert('Error saving loan: ' + creditErr.message)
+        saveBtn.disabled = false; saveBtn.textContent = '✓ Save Loan'
+        return
+      }
+
+      if (type === 'cash' && accountId) {
+        // Safe deduction
+        const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', accountId).single()
+        if (acc) await supabase.from('cash_accounts').update({ balance: Number(acc.balance) - amount }).eq('id', accountId)
+      }
+
+      close()
+      loadTab()
     })
   }
 

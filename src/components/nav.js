@@ -219,6 +219,15 @@ export function renderNav(container) {
     navigate(window.location.pathname)
   })
 
+  container.querySelector('#btn-add-store-nav')?.addEventListener('click', () => {
+    import('./add-store-modal.js').then(({ openAddStoreModal }) => {
+      openAddStoreModal(newStore => {
+        appStore.getState().setCurrentStore(newStore)
+        navigate(window.location.pathname)
+      })
+    })
+  })
+
   // ── Mode toggle ───────────────────────────────────────────
   container.querySelector('#mode-toggle-btn').addEventListener('click', () => {
     const currentlyPro = !document.body.classList.contains('lite-mode')
