@@ -1,6 +1,7 @@
 import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
 import { renderIcon } from '../components/icons.js'
+import { formatDate } from '../utils/format-date.js'
 
 const ACTION_COLORS = {
   complete_sale:      { bg:'var(--green-50)',  color:'#15803D',       label:'Sale'        },
@@ -438,7 +439,7 @@ export async function render(container) {
 function formatTime(iso) {
   const d = new Date(iso)
   return {
-    date: d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }),
+    date: formatDate(d),
     time: d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' }),
   }
 }

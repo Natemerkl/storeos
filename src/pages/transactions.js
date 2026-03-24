@@ -4,6 +4,7 @@ import { postSaleEntry, postExpenseEntry } from '../utils/accounting.js'
 import { openReceiptModal } from '../components/receipt-modal.js'
 import { renderIcon } from '../components/icons.js'
 import { getTransactions, invalidateAfterSale, invalidateAfterExpense } from '../utils/db.js'
+import { formatDate } from '../utils/format-date.js'
 
 export async function render(container) {
   const { currentStore, accountingView, stores } = appStore.getState()
@@ -219,7 +220,7 @@ export async function render(container) {
 
     tbody.innerHTML = items.map(tx => `
       <tr>
-        <td>${tx._date}</td>
+        <td>${formatDate(tx._date)}</td>
         <td>
           <span class="badge ${tx._type === 'sale' ? 'badge-green' : 'badge-red'}">
             ${tx._type === 'sale' ? 'Sale' : 'Expense'}

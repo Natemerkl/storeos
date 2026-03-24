@@ -1,5 +1,6 @@
 import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
+import { formatDateShort } from '../utils/format-date.js'
 
 export async function render(container) {
   const { currentStore, accountingView, stores } = appStore.getState()
@@ -156,7 +157,7 @@ export async function render(container) {
     overviewChart = new window.Chart(container.querySelector('#chart-overview'), {
       type: 'bar',
       data: {
-        labels: days.map(d => d.slice(5)),
+        labels: days.map(d => formatDateShort(d)),
         datasets: [
           { label: 'Sales',    data: days.map(d => salesMap[d]), backgroundColor: '#0d9488' },
           { label: 'Expenses', data: days.map(d => expMap[d]),   backgroundColor: '#f87171' },

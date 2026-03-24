@@ -1245,6 +1245,7 @@ export async function render(container) {
       container.querySelectorAll('.pay-method-btn').forEach(b => b.classList.toggle('active', b.dataset.pay===paymentMethod))
       container.querySelector('#credit-fields').style.display     = paymentMethod==='credit' ? 'block' : 'none'
       container.querySelector('#optional-customer').style.display = paymentMethod==='credit' ? 'none'  : 'block'
+      updateAccountDropdowns()
     })
   })
 
@@ -1259,6 +1260,7 @@ export async function render(container) {
       })
       const cf = document.getElementById('sheet-credit-fields')
       if (cf) cf.style.display = sheetPayMethod==='credit' ? 'block' : 'none'
+      updateAccountDropdowns()
     })
   })
 
@@ -1443,9 +1445,29 @@ export async function render(container) {
     setTimeout(() => { if (document.body.contains(overlay)) overlay.remove() }, 6000)
   }
 
+  function updateAccountDropdowns() {
+    const update = (method, selectId) => {
+      const select = document.getElementById(selectId) || container.querySelector('#' + selectId)
+      if (!select) return
+      let filtered = accounts
+      if (method === 'cash') {
+        filtered = accounts.filter(a => a.account_type === 'till')
+      } else if (method === 'bank' || method === 'telebirr') {
+        filtered = accounts.filter(a => a.account_type === 'bank')
+      }
+      if (filtered.length === 0) filtered = accounts
+      const prev = select.value
+      select.innerHTML = filtered.map(a => `<option value="${a.id}">${a.name}</option>`).join('')
+      if (filtered.some(a => a.id === prev)) select.value = prev
+    }
+    update(paymentMethod, 'sale-account')
+    update(sheetPayMethod, 'sheet-account')
+  }
+
   renderCategories()
   renderProducts()
   renderCart()
+  updateAccountDropdowns()
 }
 
 // ── Helpers ──────────────────────────────────────────────────

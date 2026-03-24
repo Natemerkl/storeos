@@ -2,6 +2,7 @@ import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
 import { audit } from '../utils/audit.js'
 import { getTransactions, invalidateAfterExpense } from '../utils/db.js'
+import { formatDate } from '../utils/format-date.js'
 
 export async function render(container) {
   const { currentStore, accountingView, stores } = appStore.getState()
@@ -225,7 +226,7 @@ export async function render(container) {
 
     tbody.innerHTML = items.map(e => `
       <tr>
-        <td>${e.expense_date}</td>
+        <td>${formatDate(e.expense_date)}</td>
         <td>${e.category ? `<span class="badge badge-grey">${e.category}</span>` : '—'}</td>
         <td>${e.description || '—'}</td>
         <td style="font-weight:600;color:var(--danger)">-${fmt(e.amount)} ETB</td>

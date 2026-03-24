@@ -202,14 +202,23 @@ export async function postInventoryEntry({ storeId, itemId, date, amount, onCred
 
 // ── DERIVED P&L (Option B — fast) ─────────────────────────────
 export async function computePandL(storeIds, from, to) {
-  const [{ data: sales }, { data: expenses }] = await Promise.all([
+  const [{ data: sales }, { data: expenses }, { data: saleItems }] = await Promise.all([
     supabase.from('sales').select('total_amount, payment_method').in('store_id', storeIds).gte('sale_date', from).lte('sale_date', to),
     supabase.from('expenses').select('amount, category').in('store_id', storeIds).gte('expense_date', from).lte('expense_date', to),
+    supabase.from('sale_items').select('quantity, sales!inner(store_id, sale_date), inventory_items(unit_cost)').in('sales.store_id', storeIds).gte('sales.sale_date', from).lte('sales.sale_date', to),
   ])
 
   const totalRevenue  = (sales||[]).reduce((s, r) => s + Number(r.total_amount), 0)
   const totalExpenses = (expenses||[]).reduce((s, r) => s + Number(r.amount), 0)
-  const grossProfit   = totalRevenue - totalExpenses
+
+  let cogs = 0
+  ;(saleItems||[]).forEach(si => {
+    const cost = si.inventory_items?.unit_cost || 0
+    cogs += Number(cost) * (Number(si.quantity) || 0)
+  })
+
+  const grossProfit = totalRevenue - cogs
+  const netProfit   = grossProfit - totalExpenses
 
   // Group expenses by category
   const expenseGroups = {}
@@ -217,14 +226,20 @@ export async function computePandL(storeIds, from, to) {
     const cat = e.category || 'Miscellaneous'
     expenseGroups[cat] = (expenseGroups[cat] || 0) + Number(e.amount)
   })
+  
+  if (cogs > 0) {
+    expenseGroups['Cost of Goods Sold (COGS)'] = cogs
+  }
 
   return {
     revenue:       totalRevenue,
-    expenses:      totalExpenses,
-    grossProfit,
-    netProfit:     grossProfit,
+    cogs:          cogs,
+    grossProfit:   grossProfit,
+    operatingExp:  totalExpenses,
+    expenses:      totalExpenses + cogs,
+    netProfit:     netProfit,
     expenseGroups,
-    margin:        totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0,
+    margin:        totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0,
   }
 }
 

@@ -4,6 +4,7 @@ import { supabase } from '../supabase.js'
 import { initSearch } from './search.js'
 import { renderIcon } from './icons.js'
 import { audit } from '../utils/audit.js'
+import { formatDate } from '../utils/format-date.js'
 
 const NAV_ITEMS = [
   { path:'/dashboard',    icon:'dashboard',    label:'Dashboard',      liteShow: true  },
@@ -265,7 +266,7 @@ export function renderNav(container) {
   function updateClock() {
     const now  = new Date()
     const time = now.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' })
-    const date = now.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })
+    const date = formatDate(now)
     const t = document.getElementById('sb-time')
     const d = document.getElementById('sb-date')
     if (t) t.textContent = time
