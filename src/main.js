@@ -132,12 +132,15 @@ export async function loadPage(pageName) {
   if (isFullScreen) {
     buildFullScreen()
   } else {
-    if (!document.querySelector('.sidebar')) buildLayout()
-    showMobileNav()
-    if (contentEl && document.body.contains(contentEl)) {
-      contentEl.innerHTML = ''
-    } else {
+    if (!document.querySelector('.sidebar')) {
       buildLayout()
+    } else {
+      showMobileNav()
+      // Only clear the page container, not the entire contentEl (which has date range selector)
+      const pageContainer = document.getElementById('page-container')
+      if (pageContainer) {
+        pageContainer.innerHTML = ''
+      }
     }
   }
 
