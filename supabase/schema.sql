@@ -1,0 +1,2 @@
+-- Supabase Database Schema
+-- To be implemented based on PROJECT.md
