@@ -18,6 +18,7 @@ const routes = {
   '/audit':         'audit',
   '/sales':         'sales',
   '/sales-history': 'sales-history',
+  '/suppliers':     'suppliers',
 }
 
 export function initRouter() {

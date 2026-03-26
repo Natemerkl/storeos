@@ -9,6 +9,7 @@ import { formatDate } from '../utils/format-date.js'
 const NAV_ITEMS = [
   { path:'/dashboard',    icon:'dashboard',    label:'Dashboard',      liteShow: true  },
   { path:'/inventory',    icon:'inventory',    label:'Inventory',      liteShow: false },
+  { path:'/suppliers',    icon:'building',     label:'Suppliers',      liteShow: false },
   { path:'/transactions', icon:'transactions', label:'Transactions',   liteShow: true  },
   { path:'/expenses',     icon:'expenses',     label:'Expenses',       liteShow: true  },
   { path:'/credits',      icon:'credits',      label:'Credits & Debts',liteShow: false },

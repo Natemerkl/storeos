@@ -205,7 +205,9 @@ export async function render(container) {
       .eq('store_id', currentStore?.id)
       .order('vendor_name')
     vendors = vendorData || []
+    console.log('Inventory: Loaded vendors:', vendors)
 
+    console.log('Populating vendor datalist...')
     // Populate categories
     const cats = [...new Set(allItems.map(i => i.category).filter(Boolean))]
     const catSelect = container.querySelector('#filter-category')
