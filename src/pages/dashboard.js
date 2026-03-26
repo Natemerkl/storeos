@@ -30,6 +30,20 @@ export async function render(container) {
     if (isStale()) return
     fillDashboard(container, fresh, isStale)
   })
+
+  // Listen for date range changes
+  const handleDateRangeChange = async () => {
+    if (isStale()) return
+    const fresh = await getDashboardData(true)
+    if (isStale()) return
+    fillDashboard(container, fresh, isStale)
+  }
+  window.addEventListener('dateRangeChanged', handleDateRangeChange)
+  
+  // Cleanup listener when page changes
+  const cleanup = () => window.removeEventListener('dateRangeChanged', handleDateRangeChange)
+  if (!container._cleanup) container._cleanup = []
+  container._cleanup.push(cleanup)
 }
 
 function buildSkeleton(currentStore, accountingView) {
@@ -175,7 +189,13 @@ function buildSkeleton(currentStore, accountingView) {
 }
 
 function fillDashboard(container, data, isStale) {
-  if (isStale?.()) return
+  const { accounts, periodSales, periodExpenses, inventoryItems, recentSales, recentExpenses, dateRange } = data
+  const { startDate, endDate } = dateRange
+  
+  // Determine period label
+  const periodLabel = startDate === endDate 
+    ? (startDate === new Date().toISOString().split('T')[0] ? "Today's" : new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))
+    : `${new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${new Date(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
 
   const get = (id) => container.querySelector(id)
   const isMobile = window.innerWidth <= 768
@@ -183,14 +203,8 @@ function fillDashboard(container, data, isStale) {
   
   if (!get('#kpi-grid') && !get('#action-grid')) return
 
-  const accounts      = data.accounts      || []
-  const todaySales    = data.todaySales    || 0
-  const todayExpenses = data.todayExpenses || 0
-  const items         = data.inventoryItems || []
-  const recentSales   = data.recentSales   || []
-  const recentExpenses= data.recentExpenses|| []
-
-  const profit = todaySales - todayExpenses
+  const items = inventoryItems || []
+  const profit = periodSales - periodExpenses
   const invVal = items.reduce((s,i) => s + Number(i.quantity) * Number(i.unit_cost||0), 0)
   const totalCash = accounts.reduce((s,a) => s + Number(a.balance), 0)
 
@@ -252,17 +266,17 @@ function fillDashboard(container, data, isStale) {
     if (kpiGrid) {
       kpiGrid.innerHTML = `
         <div class="kpi-card">
-          <div class="kpi-label">Today's Sales</div>
-          <div class="kpi-value accent">${fmt(todaySales)}</div>
+          <div class="kpi-label">${periodLabel} Sales</div>
+          <div class="kpi-value accent">${fmt(periodSales)}</div>
           <div class="kpi-sub">ETB</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Today's Expenses</div>
-          <div class="kpi-value">${fmt(todayExpenses)}</div>
+          <div class="kpi-label">${periodLabel} Expenses</div>
+          <div class="kpi-value">${fmt(periodExpenses)}</div>
           <div class="kpi-sub">ETB</div>
         </div>
         <div class="kpi-card" id="profit-card" style="cursor:pointer">
-          <div class="kpi-label">Today's Profit</div>
+          <div class="kpi-label">${periodLabel} Profit</div>
           <div class="kpi-value ${profit>=0?'accent':''}" style="${profit<0?'color:var(--danger)':''}">
             ${fmt(profit)}
           </div>
@@ -280,17 +294,17 @@ function fillDashboard(container, data, isStale) {
     if (isStale?.()) return
     get('#kpi-grid').innerHTML = `
       <div class="kpi-card">
-        <div class="kpi-label">Today's Sales</div>
-        <div class="kpi-value accent">${fmt(todaySales)}</div>
+        <div class="kpi-label">${periodLabel} Sales</div>
+        <div class="kpi-value accent">${fmt(periodSales)}</div>
         <div class="kpi-sub">ETB</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Today's Expenses</div>
-        <div class="kpi-value">${fmt(todayExpenses)}</div>
+        <div class="kpi-label">${periodLabel} Expenses</div>
+        <div class="kpi-value">${fmt(periodExpenses)}</div>
         <div class="kpi-sub">ETB</div>
       </div>
       <div class="kpi-card" id="profit-card" style="cursor:pointer">
-        <div class="kpi-label">Today's Profit</div>
+        <div class="kpi-label">${periodLabel} Profit</div>
         <div class="kpi-value ${profit>=0?'accent':''}" style="${profit<0?'color:var(--danger)':''}">
           ${fmt(profit)}
         </div>

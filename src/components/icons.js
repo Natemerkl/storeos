@@ -38,6 +38,7 @@ export const Icons = {
   eyeOff:        (s) => icon(`<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6z"/><path d="M1 12s4-8 11-8 11 8-11 8-11-8z"/><line x1="1" y1="12" x2="23" y2="12"/>`, { size: s }),
   history:       (s) => icon(`<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/>`, { size: s }),
   truck:         (s) => icon(`<path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3"/><rect x="9" y="11" width="14" height="10" rx="1"/><circle cx="12" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>`, { size: s }),
+  calendar:      (s) => icon(`<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>`, { size: s }),
 }
 
 // Render icon with optional class/style

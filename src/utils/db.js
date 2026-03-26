@@ -13,8 +13,9 @@ function cacheKey(name, ...parts) {
 
 // ── Dashboard ─────────────────────────────────────────────────
 export async function getDashboardData(forceRefresh = false) {
-  const key   = cacheKey('dashboard')
-  const today = new Date().toISOString().split('T')[0]
+  const { dateRange } = appStore.getState()
+  const { startDate, endDate } = dateRange
+  const key   = cacheKey('dashboard', startDate, endDate)
   const ids   = storeIds()
 
   if (!forceRefresh) {
@@ -31,20 +32,21 @@ export async function getDashboardData(forceRefresh = false) {
     { data: recentExpenses },
   ] = await Promise.all([
     supabase.from('cash_accounts').select('id,account_name,account_type,balance').in('store_id', ids),
-    supabase.from('sales').select('total_amount').in('store_id', ids).eq('sale_date', today),
-    supabase.from('expenses').select('amount').in('store_id', ids).eq('expense_date', today),
+    supabase.from('sales').select('total_amount').in('store_id', ids).gte('sale_date', startDate).lte('sale_date', endDate),
+    supabase.from('expenses').select('amount').in('store_id', ids).gte('expense_date', startDate).lte('expense_date', endDate),
     supabase.from('inventory_items').select('item_name,quantity,low_stock_threshold,unit_cost,selling_price').in('store_id', ids),
-    supabase.from('sales').select('id,total_amount,sale_date,created_at,payment_method').in('store_id', ids).order('created_at', { ascending: false }).limit(5),
-    supabase.from('expenses').select('id,amount,description,expense_date,created_at').in('store_id', ids).order('created_at', { ascending: false }).limit(5),
+    supabase.from('sales').select('id,total_amount,sale_date,created_at,payment_method').in('store_id', ids).gte('sale_date', startDate).lte('sale_date', endDate).order('created_at', { ascending: false }).limit(5),
+    supabase.from('expenses').select('id,amount,description,expense_date,created_at').in('store_id', ids).gte('expense_date', startDate).lte('expense_date', endDate).order('created_at', { ascending: false }).limit(5),
   ])
 
   const result = {
     accounts:       accounts || [],
-    todaySales:     (sales||[]).reduce((s,r) => s + Number(r.total_amount), 0),
-    todayExpenses:  (expenses||[]).reduce((s,r) => s + Number(r.amount), 0),
+    periodSales:    (sales||[]).reduce((s,r) => s + Number(r.total_amount), 0),
+    periodExpenses: (expenses||[]).reduce((s,r) => s + Number(r.amount), 0),
     inventoryItems: items || [],
     recentSales:    recentSales || [],
     recentExpenses: recentExpenses || [],
+    dateRange:      { startDate, endDate }, // Include for reference
   }
 
   cache.set(key, result, 30) // 30 second TTL
