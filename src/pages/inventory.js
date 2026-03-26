@@ -401,7 +401,8 @@ export async function render(container) {
     const name = container.querySelector('#f-name').value.trim()
     if (!name) { alert('Item name is required'); return }
 
-    const paidAccountId = container.querySelector('#f-paid-account').value || null
+    const _rawAccountId = container.querySelector('#f-paid-account').value
+    const paidAccountId = (_rawAccountId && _rawAccountId !== '__new__') ? _rawAccountId : null
     const paidAccountName = paidAccountId 
       ? cashAccounts.find(acc => acc.id === paidAccountId)?.account_name || null
       : null

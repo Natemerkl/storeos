@@ -23,6 +23,7 @@ export async function render(container) {
           { id:'accounts', icon:'cash',         label:'Cash Accounts'   },
           { id:'prefs',    icon:'reports',      label:'Preferences'     },
           { id:'tax',      icon:'accounting',   label:'Tax & VAT'       },
+          { id:'profit',   icon:'reports',      label:'Profit Settings' },
           { id:'danger',   icon:'alert',        label:'Danger Zone'     },
         ].map((item, i) => `
           <div class="settings-nav-item ${i===0?'active':''}" data-section="${item.id}">
@@ -105,6 +106,7 @@ export async function render(container) {
     if (id === 'accounts') await renderAccounts()
     if (id === 'prefs')    await renderPreferences()
     if (id === 'tax')      await renderTax()
+    if (id === 'profit')   await renderProfit()
     if (id === 'danger')   await renderDanger()
   }
 
@@ -390,11 +392,17 @@ export async function render(container) {
                   <td style="color:var(--muted)">${stores.find(s => s.id === a.store_id)?.name || '—'}</td>
                   <td style="font-weight:700;color:var(--accent)">${fmt(a.balance)} ETB</td>
                   <td>
-                    <button class="btn btn-outline btn-sm" data-edit-account="${a.id}"
-                      data-name="${a.account_name || a.name}" data-balance="${a.balance}"
-                      data-type="${a.account_type}" data-bank="${a.bank_name||''}" data-accnum="${a.account_number||''}">
-                      Edit
-                    </button>
+                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
+                      <button class="btn btn-outline btn-sm" data-edit-account="${a.id}"
+                        data-name="${a.account_name || a.name}" data-balance="${a.balance}"
+                        data-type="${a.account_type}" data-bank="${a.bank_name||''}" data-accnum="${a.account_number||''}">
+                        Edit
+                      </button>
+                      <button class="btn btn-sm" style="color:var(--danger);border:1px solid var(--border)"
+                        data-delete-account="${a.id}" data-delete-name="${a.account_name || a.name}">
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               `).join('')}
@@ -470,6 +478,18 @@ export async function render(container) {
       content.querySelector('#acc-bank-num').value  = ''
       bankFields.style.display = 'none'
       content.querySelector('#acc-modal').style.display = 'flex'
+    })
+
+    content.querySelectorAll('[data-delete-account]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id   = btn.dataset.deleteAccount
+        const name = btn.dataset.deleteName
+        if (!confirm(`Delete account "${name}"? This cannot be undone.`)) return
+        const { error } = await supabase.from('cash_accounts').delete().eq('id', id)
+        if (error) { alert('Could not delete: ' + error.message); return }
+        showToast('Account deleted', 'success')
+        await renderAccounts()
+      })
     })
 
     content.querySelectorAll('[data-edit-account]').forEach(btn => {
@@ -622,6 +642,129 @@ export async function render(container) {
         showToast(`Tax rate ${isActive ? 'disabled' : 'enabled'}`, 'success')
         await renderTax()
       })
+    })
+  }
+
+  // ── PROFIT SETTINGS ────────────────────────────────────────
+  async function renderProfit() {
+    const storeId = currentStore?.id
+    if (!storeId) {
+      content.innerHTML = `<div class="card"><div style="color:var(--muted)">No store selected.</div></div>`
+      return
+    }
+
+    const { data: pattern } = await supabase
+      .from('user_patterns')
+      .select('pattern_data')
+      .eq('store_id', storeId)
+      .eq('pattern_key', 'profit_settings')
+      .maybeSingle()
+
+    const settings = pattern?.pattern_data || {
+      subtract_expenses: true,
+      subtract_credits:  false,
+      use_cost_price:    false
+    }
+
+    if (!document.getElementById('toggle-styles')) {
+      const s = document.createElement('style')
+      s.id = 'toggle-styles'
+      s.textContent = `
+        .toggle-switch { position:relative;display:inline-block;width:44px;height:24px;cursor:pointer; }
+        .toggle-switch input { opacity:0;width:0;height:0; }
+        .toggle-track {
+          position:absolute;inset:0;border-radius:999px;
+          background:var(--gray-200);transition:background 0.2s;
+        }
+        .toggle-track::after {
+          content:'';position:absolute;top:3px;left:3px;
+          width:18px;height:18px;border-radius:50%;
+          background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.2);
+          transition:transform 0.2s;
+        }
+        .toggle-switch input:checked + .toggle-track { background:var(--accent); }
+        .toggle-switch input:checked + .toggle-track::after { transform:translateX(20px); }
+      `
+      document.head.appendChild(s)
+    }
+
+    content.innerHTML = `
+      <div class="card">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:1.25rem;display:flex;align-items:center;gap:0.5rem">
+          ${renderIcon('reports', 18)} Profit Calculation Settings
+        </div>
+        <div style="font-size:0.875rem;color:var(--muted);margin-bottom:1.25rem;line-height:1.6">
+          Control what is subtracted when calculating Today's Profit on the dashboard.
+          Tap the profit card on the dashboard for a full breakdown.
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Subtract Expenses</div>
+            <div class="setting-sub">Deduct today's recorded expenses from gross sales</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="ps-expenses" ${settings.subtract_expenses ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Subtract Credit Given</div>
+            <div class="setting-sub">Deduct sales recorded on credit (cash not yet collected)</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="ps-credits" ${settings.subtract_credits ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Use Cost Price (COGS)</div>
+            <div class="setting-sub">Deduct cost of goods sold based on inventory unit costs</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="ps-cost" ${settings.use_cost_price ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <div style="margin-top:1.25rem;padding:1rem;background:var(--bg-subtle);border-radius:var(--radius);font-size:0.8125rem;color:var(--muted);line-height:1.6">
+          <strong>Formula:</strong> Gross Sales
+          ${settings.use_cost_price   ? ' − Cost of Goods' : ''}
+          ${settings.subtract_expenses ? ' − Expenses'      : ''}
+          ${settings.subtract_credits  ? ' − Credit Given'  : ''}
+          = Net Profit
+        </div>
+
+        <div style="margin-top:1.25rem;display:flex;justify-content:flex-end">
+          <button class="btn btn-primary" id="btn-save-profit">Save Settings</button>
+        </div>
+      </div>
+    `
+
+    content.querySelector('#btn-save-profit').addEventListener('click', async () => {
+      const newSettings = {
+        subtract_expenses: content.querySelector('#ps-expenses').checked,
+        subtract_credits:  content.querySelector('#ps-credits').checked,
+        use_cost_price:    content.querySelector('#ps-cost').checked
+      }
+
+      const { error } = await supabase
+        .from('user_patterns')
+        .upsert(
+          { store_id: storeId, pattern_key: 'profit_settings', pattern_data: newSettings, updated_at: new Date().toISOString() },
+          { onConflict: 'store_id,pattern_key' }
+        )
+
+      if (error) {
+        showToast('Failed to save: ' + error.message, 'error')
+      } else {
+        showToast('Profit settings saved', 'success')
+        await renderProfit()
+      }
     })
   }
 

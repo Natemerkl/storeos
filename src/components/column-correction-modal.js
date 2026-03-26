@@ -23,61 +23,185 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
 
   function renderList() {
     return items.map((col) => `
-      <div data-index="${col.index}" style="
-        display:flex; align-items:center; gap:1rem; 
-        background:var(--bg-elevated); border:1px solid var(--border); 
-        border-radius:12px; padding:1rem; margin-bottom:0.75rem;
-      ">
-        <div style="flex:1; min-width:0; margin-right:0.5rem;">
-          <div style="font-size:0.6875rem; font-weight:700; color:var(--muted); margin-bottom:4px; text-transform:uppercase;">First Row Sample</div>
-          <div style="font-weight:600; color:var(--dark); word-break:break-word; font-size:0.9375rem;">${col.sample || '—'}</div>
+      <div class="ccm-col-row" data-index="${col.index}">
+        <div class="ccm-col-row-top">
+          <div class="ccm-col-sample">
+            <div class="ccm-col-label">First Row Sample</div>
+            <div class="ccm-col-value">${col.sample || '—'}</div>
+          </div>
+          <button class="col-remove-btn ccm-col-remove" data-index="${col.index}" title="Remove column">×</button>
         </div>
-
-        <select class="form-input col-type-select" data-index="${col.index}" style="width:160px; font-size:0.875rem; font-weight:600; padding:0.5rem;">
+        <select class="form-input col-type-select ccm-col-select" data-index="${col.index}" style="padding:0.5rem;">
           ${COLUMN_OPTIONS.map(opt => `
-            <option value="${opt.value}" ${col.type === opt.value ? 'selected' : ''}>
-              ${opt.label}
-            </option>
+            <option value="${opt.value}" ${col.type === opt.value ? 'selected' : ''}>${opt.label}</option>
           `).join('')}
           ${!COLUMN_OPTIONS.find(o => o.value === col.type) && col.type ? `<option value="${col.type}" selected>${col.type}</option>` : ''}
         </select>
-
-        <button class="col-remove-btn" data-index="${col.index}" style="
-          color:var(--danger); border:none; background:transparent; cursor:pointer;
-          font-size:1.5rem; padding:0 0.25rem; line-height:1; font-weight:400; transition:opacity 0.15s;
-        " title="Remove column">×</button>
       </div>
     `).join('');
   }
 
   overlay.innerHTML = `
-    <div class="modal" style="max-width:900px; width:95%; max-height:92vh; display:flex; flex-direction:column; padding:0;">
-      <div style="padding:1.25rem 1.5rem; border-bottom:1px solid var(--border);">
-        <h2 style="font-size:1.5rem; font-weight:600; margin:0 0 0.25rem 0;">Correct Column Types</h2>
-        <p style="color:var(--muted); margin:0;">Rename or remove columns. Only keep the ones you need.</p>
+    <style>
+      .ccm-wrap {
+        max-width: 900px;
+        width: 95%;
+        max-height: 92dvh;
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        overflow: hidden;
+      }
+      .ccm-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .ccm-img-panel {
+        flex-shrink: 0;
+        max-height: 36vw;
+        min-height: 120px;
+        overflow: hidden;
+        background: var(--bg-subtle);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.75rem;
+      }
+      .ccm-img-panel img {
+        max-height: 100%;
+        max-width: 100%;
+        width: auto;
+        border-radius: 8px;
+        box-shadow: var(--shadow-md);
+        object-fit: contain;
+        display: block;
+      }
+      .ccm-map-panel {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+      .ccm-col-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.875rem;
+        margin-bottom: 0.625rem;
+      }
+      .ccm-col-row-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .ccm-col-sample {
+        flex: 1;
+        min-width: 0;
+      }
+      .ccm-col-label {
+        font-size: 0.625rem;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 2px;
+      }
+      .ccm-col-value {
+        font-weight: 600;
+        color: var(--dark);
+        word-break: break-word;
+        font-size: 0.9375rem;
+      }
+      .ccm-col-remove {
+        color: var(--danger);
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-size: 1.4rem;
+        padding: 0 0.25rem;
+        line-height: 1;
+        font-weight: 400;
+        flex-shrink: 0;
+        transition: opacity 0.15s;
+      }
+      .ccm-col-select {
+        width: 100%;
+        font-size: 0.875rem;
+        font-weight: 600;
+      }
+      .ccm-actions {
+        display: flex;
+        gap: 0.75rem;
+        padding: 0.875rem 1rem;
+        border-top: 1px solid var(--border);
+        background: var(--bg-base, #fff);
+        flex-shrink: 0;
+      }
+      @media (min-width: 640px) {
+        .ccm-body { flex-direction: row; }
+        .ccm-img-panel {
+          flex: 1;
+          max-height: none;
+          min-height: unset;
+          border-bottom: none;
+          border-right: 1px solid var(--border);
+          padding: 1.5rem;
+          overflow: auto;
+          align-items: flex-start;
+        }
+        .ccm-img-panel img { max-height: none; }
+        .ccm-map-panel {
+          flex: 1;
+          min-width: 300px;
+          padding: 1.25rem 1.25rem 0;
+        }
+        .ccm-col-row { flex-direction: row; align-items: center; }
+        .ccm-col-row-top { flex: 1; min-width: 0; }
+        .ccm-col-select { width: 160px; }
+        .ccm-actions { padding: 1rem 1.25rem 1.25rem; }
+      }
+    </style>
+
+    <div class="modal ccm-wrap">
+      <div style="padding:1rem 1.25rem 0.875rem; border-bottom:1px solid var(--border); flex-shrink:0;">
+        <h2 style="font-size:1.375rem; font-weight:700; margin:0 0 0.2rem 0;">Correct Column Types</h2>
+        <p style="color:var(--muted); margin:0; font-size:0.875rem;">Rename or remove columns. Only keep the ones you need.</p>
       </div>
 
-      <div style="display:flex; flex:1; overflow:hidden; flex-wrap:wrap;">
-        <!-- Left: Image -->
-        <div style="flex:1; min-width:300px; border-right:1px solid var(--border); overflow:auto; padding:1.5rem; background:var(--bg-subtle);">
-          <img src="${imageUrl}" alt="Receipt" style="max-width:100%; display:block; border-radius:8px; box-shadow:var(--shadow-md); margin:0 auto;">
+      <div class="ccm-body">
+        <!-- Image panel -->
+        <div class="ccm-img-panel">
+          <img src="${imageUrl}" alt="Receipt">
         </div>
 
-        <!-- Right: Settings -->
-        <div style="flex:1; min-width:340px; padding:1.5rem; overflow:auto; display:flex; flex-direction:column;">
-          <div id="col-list-container" style="flex:1;">
+        <!-- Mapping panel -->
+        <div class="ccm-map-panel">
+          <div id="col-list-container">
             ${renderList()}
           </div>
-
-          <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
-            <button id="btn-col-save" class="btn btn-primary" style="flex:2; justify-content:center; padding:0.875rem; font-size:1rem;">
-              Looks Good – Save & Continue
-            </button>
-            <button id="btn-col-rescan" class="btn btn-outline" style="flex:1; justify-content:center; padding:0.875rem; font-size:1rem;">
-              Re-scan
-            </button>
-          </div>
         </div>
+      </div>
+
+      <!-- Action buttons always pinned to bottom -->
+      <div class="ccm-actions">
+        <button id="btn-col-save" class="btn btn-primary" style="flex:2; justify-content:center; padding:0.75rem; font-size:0.9375rem;">
+          Save &amp; Continue
+        </button>
+        <button id="btn-col-rescan" class="btn btn-outline" style="flex:1; justify-content:center; padding:0.75rem; font-size:0.9375rem;">
+          Re-scan
+        </button>
       </div>
     </div>
   `;

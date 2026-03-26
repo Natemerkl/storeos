@@ -261,12 +261,12 @@ function fillDashboard(container, data, isStale) {
           <div class="kpi-value">${fmt(todayExpenses)}</div>
           <div class="kpi-sub">ETB</div>
         </div>
-        <div class="kpi-card">
+        <div class="kpi-card" id="profit-card" style="cursor:pointer">
           <div class="kpi-label">Today's Profit</div>
           <div class="kpi-value ${profit>=0?'accent':''}" style="${profit<0?'color:var(--danger)':''}">
             ${fmt(profit)}
           </div>
-          <div class="kpi-sub">ETB</div>
+          <div class="kpi-sub" style="color:var(--accent);font-size:10px">tap for breakdown</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Inventory Value</div>
@@ -289,12 +289,12 @@ function fillDashboard(container, data, isStale) {
         <div class="kpi-value">${fmt(todayExpenses)}</div>
         <div class="kpi-sub">ETB</div>
       </div>
-      <div class="kpi-card">
+      <div class="kpi-card" id="profit-card" style="cursor:pointer">
         <div class="kpi-label">Today's Profit</div>
         <div class="kpi-value ${profit>=0?'accent':''}" style="${profit<0?'color:var(--danger)':''}">
           ${fmt(profit)}
         </div>
-        <div class="kpi-sub">ETB</div>
+        <div class="kpi-sub" style="color:var(--accent);font-size:10px">click for breakdown</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Inventory Value</div>
@@ -303,6 +303,9 @@ function fillDashboard(container, data, isStale) {
       </div>
     `
   }
+
+  // Profit card click → breakdown modal
+  get('#profit-card')?.addEventListener('click', () => openProfitModal())
 
   // Fill cash positions (both mobile and desktop) - remove emojis
   if (isStale?.()) return
@@ -617,6 +620,113 @@ async function renderLite(container) {
       import('../router.js').then(m => m.navigate(btn.dataset.nav))
     })
   })
+}
+
+async function openProfitModal() {
+  const { currentStore } = appStore.getState()
+  const storeId = currentStore?.id
+  if (!storeId) return
+
+  const today = new Date().toISOString().split('T')[0]
+
+  // Load profit settings from user_patterns
+  const { data: pattern } = await supabase
+    .from('user_patterns')
+    .select('pattern_data')
+    .eq('store_id', storeId)
+    .eq('pattern_key', 'profit_settings')
+    .maybeSingle()
+
+  const settings = pattern?.pattern_data || {
+    subtract_expenses: true,
+    subtract_credits:  false,
+    use_cost_price:    false
+  }
+
+  // Build and show modal with loading state
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  overlay.style.cssText = 'display:flex;'
+  overlay.innerHTML = `
+    <div class="modal" style="min-width:340px;max-width:460px;width:100%">
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex;align-items:center;gap:0.5rem">
+          ${renderIcon('reports', 18)} Today's Profit Breakdown
+        </div>
+        <button class="modal-close" id="profit-modal-close">${renderIcon('close', 14)}</button>
+      </div>
+      <div id="profit-modal-body" style="padding:0.25rem 0">
+        <div style="text-align:center;padding:2rem;color:var(--muted)">Calculating...</div>
+      </div>
+    </div>
+  `
+  document.body.appendChild(overlay)
+
+  const closeModal = () => overlay.remove()
+  overlay.querySelector('#profit-modal-close').addEventListener('click', closeModal)
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal() })
+
+  // Call DB function
+  const { data, error } = await supabase.rpc('calculate_profit', {
+    p_store_id: storeId,
+    p_date:     today,
+    p_settings: settings
+  })
+
+  const body = overlay.querySelector('#profit-modal-body')
+  if (!body) return
+
+  if (error || !data) {
+    body.innerHTML = `
+      <div style="color:var(--danger);padding:1.25rem;text-align:center;font-size:0.875rem">
+        ${error?.message || 'Failed to calculate profit.'}
+      </div>
+    `
+    return
+  }
+
+  const grossSales   = Number(data.gross_sales   || 0)
+  const cogs         = Number(data.cogs          || 0)
+  const expenses     = Number(data.expenses      || 0)
+  const creditGiven  = Number(data.credit_given  || 0)
+  const netProfit    = Number(data.net_profit     || 0)
+  const used         = data.settings_used || {}
+
+  const divider = (label, amount, color, prefix) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                padding:0.75rem 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:0.875rem;color:var(--muted)">${label}</span>
+      <span style="font-weight:600;color:${color}">${prefix}${fmt(amount)} ETB</span>
+    </div>
+  `
+
+  const activeToggles = [
+    used.use_cost_price    ? 'cost price' : '',
+    used.subtract_expenses ? 'expenses'   : '',
+    used.subtract_credits  ? 'credits'    : ''
+  ].filter(Boolean)
+
+  body.innerHTML = `
+    <div style="padding:0 0 0.5rem">
+      ${divider('Gross Sales', grossSales, 'var(--accent)', '+')}
+      ${used.use_cost_price    ? divider('Cost of Goods Sold', cogs,        'var(--danger)', '−') : ''}
+      ${used.subtract_expenses ? divider('Expenses',           expenses,    'var(--danger)', '−') : ''}
+      ${used.subtract_credits  ? divider('Credit Given',       creditGiven, 'var(--danger)', '−') : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem 0 0">
+        <span style="font-size:1rem;font-weight:700;color:var(--dark)">Net Profit</span>
+        <span style="font-size:1.375rem;font-weight:800;color:${netProfit>=0?'var(--accent)':'var(--danger)'}">
+          ${fmt(netProfit)} ETB
+        </span>
+      </div>
+      <div style="margin-top:1rem;padding:0.75rem;background:var(--bg-subtle);
+                  border-radius:var(--radius);font-size:0.8125rem;color:var(--muted);line-height:1.6">
+        ${activeToggles.length
+          ? `Subtracting: <strong>${activeToggles.join(', ')}</strong>.`
+          : 'Showing gross sales only.'}
+        Configure in <strong>Settings → Profit Settings</strong>.
+      </div>
+    </div>
+  `
 }
 
 function injectSkeletonStyles() {

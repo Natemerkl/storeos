@@ -16,6 +16,7 @@ const ALL_NAV_ITEMS = [
   { path: '/sales',        icon: 'store',        label: 'Point of Sale'   },
   { path: '/sales-history',icon: 'history',      label: 'Sales History'   },
   { path: '/inventory',    icon: 'inventory',    label: 'Inventory'       },
+  { path: '/suppliers',    icon: 'building',     label: 'Suppliers'       },
   { path: '/transactions', icon: 'transactions', label: 'Transactions'    },
   { path: '/expenses',     icon: 'expenses',     label: 'Expenses'        },
   { path: '/credits',      icon: 'credits',      label: 'Credits & Debts' },
@@ -146,38 +147,41 @@ export function initMobileNav() {
   function updateVisibility() {
     const hidden = HIDDEN_ROUTES.has(window.location.pathname)
     const mobile = window.innerWidth <= 768
-    const modalOpen = document.querySelector('.modal-overlay') !== null
-    
+
+    // Only hide when a modal-overlay is ACTUALLY visible (display:flex or block)
+    // Modals start as display:none in page HTML — checking mere DOM presence was
+    // the bug that caused the nav to disappear on every page load.
+    const modalOpen = mobile && Array.from(document.querySelectorAll('.modal-overlay')).some(
+      m => m.style.display === 'flex' || m.style.display === 'block'
+    )
+
     const navElement = document.getElementById('mobile-nav')
-    if (navElement) {
-      // Handle modal visibility
-      if (modalOpen && mobile) {
-        navElement.classList.add('modal-hidden')
-      } else {
-        navElement.classList.remove('modal-hidden')
-      }
-      
-      // Handle route/desktop visibility - only hide on auth/onboarding or desktop
-      if (hidden) {
-        navElement.classList.add('route-hidden')
-      } else {
-        navElement.classList.remove('route-hidden')
-      }
-    }
-    
+    if (!navElement) return
+
+    navElement.classList.toggle('modal-hidden', modalOpen)
+    navElement.classList.toggle('route-hidden', hidden)
+
     if (hidden && drawerOpen) closeDrawer()
   }
 
   // ── Modal observer ───────────────────────────────────────
+  // Watch style attribute changes (modal open/close) + new modal nodes added
   function observeModals() {
-    const observer = new MutationObserver(() => {
-      updateVisibility()
+    const observer = new MutationObserver((mutations) => {
+      const relevant = mutations.some(m =>
+        (m.type === 'attributes' && m.target.classList?.contains('modal-overlay')) ||
+        (m.type === 'childList' && (
+          Array.from(m.addedNodes).some(n => n.nodeType === 1 &&
+            (n.classList?.contains('modal-overlay') || n.querySelector?.('.modal-overlay')))
+        ))
+      )
+      if (relevant) updateVisibility()
     })
-    
     observer.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: false
+      attributes: true,
+      attributeFilter: ['style'],
     })
   }
 

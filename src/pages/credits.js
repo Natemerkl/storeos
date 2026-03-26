@@ -167,20 +167,44 @@ export async function render(container) {
 
   function renderCreditRows(credits) {
     if (!credits.length) return `<tr><td colspan="7"><div class="empty"><div class="empty-text">No credit sales found</div></div></td></tr>`
-    return credits.map(c => {
-      const remaining = Number(c.amount_owed) - Number(c.amount_paid)
-      const pct       = Math.round((Number(c.amount_paid) / Number(c.amount_owed)) * 100)
-      const isOverdue = c.status !== 'paid' && c.due_date && new Date(c.due_date) < new Date()
+
+    // Group by customer_id so the same customer shows as one unified row
+    const groups = {}
+    for (const c of credits) {
+      const key = c.customer_id || 'unknown'
+      if (!groups[key]) groups[key] = { customer: c.customers, items: [] }
+      groups[key].items.push(c)
+    }
+
+    return Object.values(groups).map(g => {
+      const totalOwed  = g.items.reduce((s, c) => s + Number(c.amount_owed), 0)
+      const totalPaid  = g.items.reduce((s, c) => s + Number(c.amount_paid), 0)
+      const remaining  = totalOwed - totalPaid
+      const pct        = totalOwed > 0 ? Math.round((totalPaid / totalOwed) * 100) : 0
+      const allPaid    = remaining <= 0.01
+      const status     = allPaid ? 'paid' : totalPaid > 0 ? 'partial' : 'unpaid'
+      const isOverdue  = !allPaid && g.items.some(c => c.status !== 'paid' && c.due_date && new Date(c.due_date) < new Date())
+      const salesCount = g.items.length
+      const latestDate = g.items.map(c => c.sales?.sale_date).filter(Boolean).sort().reverse()[0] || '—'
+      // Oldest unpaid first for waterfall payment
+      const unpaidIds  = g.items
+        .filter(c => c.status !== 'paid')
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        .map(c => c.id)
+
       return `
         <tr>
           <td>
-            <div style="font-weight:600">${c.customers?.name || '—'}</div>
-            <div style="font-size:11.5px;color:var(--muted)">${c.customers?.phone || ''}</div>
+            <div style="font-weight:600">${g.customer?.name || '—'}</div>
+            <div style="font-size:11.5px;color:var(--muted)">${g.customer?.phone || ''}</div>
           </td>
-          <td>${c.sales?.sale_date || '—'}</td>
-          <td>${fmt(c.amount_owed)} ETB</td>
           <td>
-            <div>${fmt(c.amount_paid)} ETB</div>
+            ${latestDate}
+            ${salesCount > 1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${salesCount} sales</div>` : ''}
+          </td>
+          <td>${fmt(totalOwed)} ETB</td>
+          <td>
+            <div>${fmt(totalPaid)} ETB</div>
             <div style="height:4px;background:var(--border);border-radius:999px;margin-top:4px;width:80px">
               <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:999px"></div>
             </div>
@@ -189,18 +213,21 @@ export async function render(container) {
             ${remaining > 0 ? fmt(remaining) + ' ETB' : '✓ Paid'}
           </td>
           <td>
-            <span class="badge ${c.status==='paid' ? 'badge-green' : c.status==='partial' ? 'badge-yellow' : isOverdue ? 'badge-red' : 'badge-grey'}">
-              ${isOverdue && c.status !== 'paid' ? 'Overdue' : c.status}
+            <span class="badge ${status==='paid' ? 'badge-green' : status==='partial' ? 'badge-yellow' : isOverdue ? 'badge-red' : 'badge-grey'}">
+              ${isOverdue && status !== 'paid' ? 'Overdue' : status}
             </span>
           </td>
           <td>
             <div style="display:flex;gap:0.4rem">
-              ${c.status !== 'paid' ? `
-                <button class="btn btn-primary btn-sm" data-action="pay-credit" data-id="${c.id}" data-name="${c.customers?.name}" data-remaining="${remaining}">
+              ${!allPaid ? `
+                <button class="btn btn-primary btn-sm" data-action="pay-credit"
+                  data-ids="${encodeURIComponent(JSON.stringify(unpaidIds))}"
+                  data-name="${g.customer?.name || '—'}"
+                  data-remaining="${remaining}">
                   + Payment
                 </button>
               ` : ''}
-              <button class="btn btn-outline btn-sm" data-action="view-history" data-customer-id="${c.customers?.id}">History</button>
+              <button class="btn btn-outline btn-sm" data-action="view-history" data-customer-id="${g.customer?.id}">History</button>
             </div>
           </td>
         </tr>
@@ -212,7 +239,7 @@ export async function render(container) {
     el.querySelectorAll('[data-action="pay-credit"]').forEach(btn => {
       btn.addEventListener('click', () => openPaymentModal({
         type:      'credit',
-        id:        btn.dataset.id,
+        ids:       JSON.parse(decodeURIComponent(btn.dataset.ids)),
         name:      btn.dataset.name,
         remaining: Number(btn.dataset.remaining),
         onDone:    loadTab,
@@ -656,7 +683,7 @@ export async function render(container) {
         <div class="form-group" id="lend-account-group" style="display:none">
           <label class="form-label">Cash Account to Deduct From</label>
           <select class="form-input" id="lend-account">
-            ${(accounts||[]).map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+            ${(accounts||[]).map(a => `<option value="${a.id}">${a.account_name} (${a.account_type === 'till' ? 'Till' : 'Bank'})</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
@@ -716,7 +743,7 @@ export async function render(container) {
   }
 
   // ── Payment modal ─────────────────────────────────────────
-  function openPaymentModal({ type, id, name, remaining, onDone }) {
+  function openPaymentModal({ type, id, ids, name, remaining, onDone }) {
     const modal     = container.querySelector('#payment-modal')
     const titleEl   = container.querySelector('#payment-modal-title')
     const bodyEl    = container.querySelector('#payment-modal-body')
@@ -742,7 +769,7 @@ export async function render(container) {
       <div class="form-group">
         <label class="form-label">Cash Account</label>
         <select class="form-input" id="pay-account">
-          ${(accounts||[]).map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+          ${(accounts||[]).map(a => `<option value="${a.id}">${a.account_name} (${a.account_type === 'till' ? 'Till' : 'Bank'})</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -774,57 +801,63 @@ export async function render(container) {
       if (!amount || amount <= 0) { alert('Enter a valid amount'); return }
       if (amount > remaining + 0.01) { alert(`Cannot exceed remaining balance of ${fmt(remaining)} ETB`); return }
 
-      const table  = type === 'credit' ? 'credit_sales' : 'vendor_debts'
-      const amtKey = type === 'credit' ? 'amount_owed'  : 'amount_owed'
-
-      // Get current record
-      const { data: record } = await supabase.from(table).select('amount_paid, amount_owed').eq('id', id).single()
-      const newPaid      = Number(record.amount_paid) + amount
-      const newStatus    = newPaid >= Number(record.amount_owed) - 0.01 ? 'paid' : 'partial'
-
-      await supabase.from(table).update({
-        amount_paid: newPaid,
-        status:      newStatus,
-      }).eq('id', id)
-
-      // Update cash account balance
-      if (account) {
-        if (type === 'credit') {
-          // Money coming IN to store
-          await supabase.from('cash_accounts')
-            .update({ balance: supabase.rpc ? undefined : 0 })
-            .eq('id', account)
-          // Use raw increment via RPC workaround
-          const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', account).single()
-          await supabase.from('cash_accounts').update({ balance: Number(acc.balance) + amount }).eq('id', account)
-        } else {
-          // Money going OUT from store to vendor
-          const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', account).single()
-          await supabase.from('cash_accounts').update({ balance: Number(acc.balance) - amount }).eq('id', account)
-        }
-      }
-
-      modal.style.display = 'none'
-
-      // Post journal entry
       if (type === 'credit') {
-        invalidateAfterSale() // Also invalidates accounts
-        // Audit log
-        await audit.creditPaymentReceived(record, amount, name)
+        // Waterfall: apply payment oldest-first across all unpaid credits for this customer
+        const creditIds = ids || [id]
+        let leftToApply = amount
+        let firstRecord = null
+        const date = new Date().toISOString().split('T')[0]
 
+        for (const cid of creditIds) {
+          if (leftToApply <= 0.001) break
+          const { data: rec } = await supabase.from('credit_sales').select('amount_paid, amount_owed').eq('id', cid).single()
+          if (!rec) continue
+          if (!firstRecord) firstRecord = rec
+          const canApply  = Number(rec.amount_owed) - Number(rec.amount_paid)
+          if (canApply <= 0.001) continue
+          const applying  = Math.min(leftToApply, canApply)
+          const newPaid   = Number(rec.amount_paid) + applying
+          const newStatus = newPaid >= Number(rec.amount_owed) - 0.01 ? 'paid' : 'partial'
+          await supabase.from('credit_sales').update({ amount_paid: newPaid, status: newStatus }).eq('id', cid)
+          leftToApply -= applying
+        }
+
+        // Credit cash account (money coming IN)
+        if (account) {
+          const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', account).single()
+          if (acc) await supabase.from('cash_accounts').update({ balance: Number(acc.balance) + amount }).eq('id', account)
+        }
+
+        modal.style.display = 'none'
+        invalidateAfterSale()
+
+        if (firstRecord) await audit.creditPaymentReceived(firstRecord, amount, name)
         try {
           await postCreditPaymentEntry({
             storeId:  currentStore?.id,
-            creditId: id,
-            date:     new Date().toISOString().split('T')[0],
+            creditId: (ids || [id])[0],
+            date,
             amount,
           })
         } catch(e) { console.warn('Journal post failed:', e.message) }
-      } else {
-        invalidateAfterExpense() // Also invalidates accounts
-        // Audit log
-        await audit.vendorPaymentMade(record, amount, name)
 
+      } else {
+        // Single vendor debt
+        const { data: record } = await supabase.from('vendor_debts').select('amount_paid, amount_owed').eq('id', id).single()
+        const newPaid   = Number(record.amount_paid) + amount
+        const newStatus = newPaid >= Number(record.amount_owed) - 0.01 ? 'paid' : 'partial'
+        await supabase.from('vendor_debts').update({ amount_paid: newPaid, status: newStatus }).eq('id', id)
+
+        // Debit cash account (money going OUT)
+        if (account) {
+          const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', account).single()
+          if (acc) await supabase.from('cash_accounts').update({ balance: Number(acc.balance) - amount }).eq('id', account)
+        }
+
+        modal.style.display = 'none'
+        invalidateAfterExpense()
+
+        await audit.vendorPaymentMade(record, amount, name)
         try {
           await postVendorPaymentEntry({
             storeId: currentStore?.id,
@@ -914,7 +947,7 @@ export async function render(container) {
 // ── Accounts loaded for payment modal ─────────────────────────
 let accounts = []
 async function loadAccounts(storeIds) {
-  const { data } = await supabase.from('cash_accounts').select('id, name').in('store_id', storeIds)
+  const { data } = await supabase.from('cash_accounts').select('id, account_name, account_type').in('store_id', storeIds)
   accounts = data || []
 }
 
@@ -930,4 +963,4 @@ function showToast(msg, type = 'info') {
   if (!wrap) { wrap = document.createElement('div'); wrap.className = 'toast-container'; document.body.appendChild(wrap) }
   wrap.appendChild(t)
   setTimeout(() => t.remove(), 3000)
-}
+}
