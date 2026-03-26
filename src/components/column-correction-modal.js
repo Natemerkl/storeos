@@ -41,64 +41,78 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
     `).join('');
   }
 
+  // Lock body scroll while modal is open
+  const _prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
   overlay.innerHTML = `
     <style>
       .ccm-wrap {
         max-width: 900px;
-        width: 95%;
-        max-height: 92dvh;
+        width: 96%;
+        max-height: 90dvh;
         display: flex;
         flex-direction: column;
         padding: 0;
         overflow: hidden;
+        border-radius: 16px;
       }
+      /* Always row: image mini-panel left, mapping right */
       .ccm-body {
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         flex: 1;
         min-height: 0;
         overflow: hidden;
       }
       .ccm-img-panel {
+        width: 96px;
         flex-shrink: 0;
-        max-height: 36vw;
-        min-height: 120px;
-        overflow: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         background: var(--bg-subtle);
-        border-bottom: 1px solid var(--border);
+        border-right: 1px solid var(--border);
         display: flex;
+        flex-direction: column;
         align-items: center;
-        justify-content: center;
-        padding: 0.75rem;
+        padding: 0.625rem 0.5rem;
+        gap: 0.5rem;
       }
       .ccm-img-panel img {
-        max-height: 100%;
-        max-width: 100%;
-        width: auto;
-        border-radius: 8px;
+        width: 100%;
+        height: auto;
+        border-radius: 6px;
         box-shadow: var(--shadow-md);
         object-fit: contain;
         display: block;
       }
+      .ccm-img-label {
+        font-size: 0.6rem;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        text-align: center;
+      }
+      /* Mapping panel: fills remaining width, scrolls independently */
       .ccm-map-panel {
         flex: 1;
-        min-height: 0;
+        min-width: 0;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0;
+        overscroll-behavior: contain;
+        touch-action: pan-y;
+        padding: 0.75rem;
       }
       .ccm-col-row {
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.4rem;
         background: var(--bg-elevated);
         border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 0.875rem;
-        margin-bottom: 0.625rem;
+        border-radius: 10px;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
       }
       .ccm-col-row-top {
         display: flex;
@@ -106,12 +120,9 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
         justify-content: space-between;
         gap: 0.5rem;
       }
-      .ccm-col-sample {
-        flex: 1;
-        min-width: 0;
-      }
+      .ccm-col-sample { flex: 1; min-width: 0; }
       .ccm-col-label {
-        font-size: 0.625rem;
+        font-size: 0.6rem;
         font-weight: 700;
         color: var(--muted);
         text-transform: uppercase;
@@ -122,7 +133,7 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
         font-weight: 600;
         color: var(--dark);
         word-break: break-word;
-        font-size: 0.9375rem;
+        font-size: 0.875rem;
       }
       .ccm-col-remove {
         color: var(--danger);
@@ -130,63 +141,56 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
         background: transparent;
         cursor: pointer;
         font-size: 1.4rem;
-        padding: 0 0.25rem;
+        padding: 0 0.125rem;
         line-height: 1;
         font-weight: 400;
         flex-shrink: 0;
-        transition: opacity 0.15s;
       }
       .ccm-col-select {
         width: 100%;
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
         font-weight: 600;
+        padding: 0.4rem 0.5rem;
       }
       .ccm-actions {
         display: flex;
-        gap: 0.75rem;
-        padding: 0.875rem 1rem;
+        gap: 0.625rem;
+        padding: 0.75rem 0.875rem;
         border-top: 1px solid var(--border);
         background: var(--bg-base, #fff);
         flex-shrink: 0;
       }
-      @media (min-width: 640px) {
-        .ccm-body { flex-direction: row; }
+      /* Wider screens: enlarge image panel */
+      @media (min-width: 600px) {
         .ccm-img-panel {
-          flex: 1;
-          max-height: none;
-          min-height: unset;
-          border-bottom: none;
-          border-right: 1px solid var(--border);
-          padding: 1.5rem;
-          overflow: auto;
-          align-items: flex-start;
+          width: 220px;
+          padding: 1.25rem;
         }
-        .ccm-img-panel img { max-height: none; }
-        .ccm-map-panel {
-          flex: 1;
-          min-width: 300px;
-          padding: 1.25rem 1.25rem 0;
-        }
-        .ccm-col-row { flex-direction: row; align-items: center; }
-        .ccm-col-row-top { flex: 1; min-width: 0; }
-        .ccm-col-select { width: 160px; }
-        .ccm-actions { padding: 1rem 1.25rem 1.25rem; }
+        .ccm-map-panel { padding: 1.25rem; }
+        .ccm-col-row { padding: 1rem; gap: 0.5rem; }
+        .ccm-col-value { font-size: 0.9375rem; }
+        .ccm-col-select { font-size: 0.875rem; }
+        .ccm-actions { padding: 1rem 1.25rem; }
+      }
+      @media (min-width: 900px) {
+        .ccm-img-panel { width: 340px; }
       }
     </style>
 
     <div class="modal ccm-wrap">
-      <div style="padding:1rem 1.25rem 0.875rem; border-bottom:1px solid var(--border); flex-shrink:0;">
-        <h2 style="font-size:1.375rem; font-weight:700; margin:0 0 0.2rem 0;">Correct Column Types</h2>
-        <p style="color:var(--muted); margin:0; font-size:0.875rem;">Rename or remove columns. Only keep the ones you need.</p>
+      <div style="padding:0.875rem 1.125rem; border-bottom:1px solid var(--border); flex-shrink:0;">
+        <h2 style="font-size:1.25rem; font-weight:700; margin:0 0 0.15rem 0;">Correct Column Types</h2>
+        <p style="color:var(--muted); margin:0; font-size:0.8125rem;">Rename or remove columns. Only keep the ones you need.</p>
       </div>
 
       <div class="ccm-body">
-        <!-- Image panel -->
+        <!-- Image: compact side panel -->
         <div class="ccm-img-panel">
+          <div class="ccm-img-label">Receipt</div>
           <img src="${imageUrl}" alt="Receipt">
         </div>
 
-        <!-- Mapping panel -->
+        <!-- Mapping: scrolls independently -->
         <div class="ccm-map-panel">
           <div id="col-list-container">
             ${renderList()}
@@ -194,12 +198,11 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
         </div>
       </div>
 
-      <!-- Action buttons always pinned to bottom -->
       <div class="ccm-actions">
-        <button id="btn-col-save" class="btn btn-primary" style="flex:2; justify-content:center; padding:0.75rem; font-size:0.9375rem;">
+        <button id="btn-col-save" class="btn btn-primary" style="flex:2; justify-content:center; padding:0.625rem 0.75rem; font-size:0.9rem;">
           Save &amp; Continue
         </button>
-        <button id="btn-col-rescan" class="btn btn-outline" style="flex:1; justify-content:center; padding:0.75rem; font-size:0.9375rem;">
+        <button id="btn-col-rescan" class="btn btn-outline" style="flex:1; justify-content:center; padding:0.625rem 0.75rem; font-size:0.9rem;">
           Re-scan
         </button>
       </div>
@@ -243,11 +246,13 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
       const found = items.find(i => i.index === orig.index);
       return found ? found.type : 'ignore';
     });
+    document.body.style.overflow = _prevOverflow;
     overlay.remove();
     if (onSave) onSave(manualTypes);
   });
 
   overlay.querySelector('#btn-col-rescan').addEventListener('click', () => {
+    document.body.style.overflow = _prevOverflow;
     overlay.remove();
     if (onRescan) onRescan();
   });

@@ -26,7 +26,7 @@ export async function render(container) {
   // Load cash accounts
   const { data: accounts } = await supabase
     .from('cash_accounts')
-    .select('id, name')
+    .select('id, account_name')
     .in('store_id', storeIds)
   
   cashAccounts = accounts || []
@@ -48,7 +48,7 @@ export async function render(container) {
         
         <select class="form-input" id="filter-account" style="max-width:160px">
           <option value="">All Payment Methods</option>
-          ${cashAccounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+          ${cashAccounts.map(a => `<option value="${a.id}">${a.account_name}</option>`).join('')}
         </select>
         
         <input type="text" class="form-input" id="filter-search" placeholder="Search..." style="max-width:200px">
@@ -106,7 +106,7 @@ async function loadSales() {
       created_at,
       customer_id,
       customer_note,
-      cash_accounts(name)
+      cash_accounts(account_name)
     `)
     .in('store_id', storeIds)
     .order('created_at', { ascending: false })
@@ -198,7 +198,7 @@ function applyFilters() {
     const searchMatch = !searchText || 
       sale.id.toString().includes(searchText) ||
       sale.total_amount.toString().includes(searchText) ||
-      sale.cash_accounts?.name?.toLowerCase().includes(searchText)
+      sale.cash_accounts?.account_name?.toLowerCase().includes(searchText)
 
     return dateMatch && accountMatch && searchMatch
   })
@@ -279,7 +279,7 @@ function renderSales() {
     html += '<span style="font-size:0.875rem;color:var(--muted)">' + dateTime + '</span>'
     html += '</div>'
     html += '<div style="display:flex;align-items:center;gap:0.5rem">'
-    html += '<span class="badge badge-grey">' + (sale.cash_accounts?.name || 'Unknown') + '</span>'
+    html += '<span class="badge badge-grey">' + (sale.cash_accounts?.account_name || 'Unknown') + '</span>'
     html += '<span style="font-weight:700;color:var(--accent);font-size:1.0625rem">'
     html += fmt(sale.total_amount) + ' ETB'
     html += '</span>'
@@ -387,7 +387,7 @@ window.toggleSaleItems = async function(saleId) {
         detailsHtml += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Account Information</div>'
         detailsHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
         
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Cash Account</div><div style="font-weight:500">' + (sale.cash_accounts?.name || 'Unknown') + '</div></div>'
+        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Cash Account</div><div style="font-weight:500">' + (sale.cash_accounts?.account_name || 'Unknown') + '</div></div>'
         detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Total Amount</div><div style="font-weight:600;color:var(--accent)">' + fmt(sale.total_amount) + ' ETB</div></div>'
         
         detailsHtml += '</div></div>'
@@ -456,7 +456,7 @@ window.shareReceipt = async function(saleId) {
   receiptText += `Receipt #: ${sale.id}\n`
   receiptText += `Date: ${dateTime}\n`
   receiptText += `Store: ${sale.stores?.name || 'Unknown'}\n`
-  receiptText += `Payment: ${sale.payment_method || 'Unknown'} (${sale.cash_accounts?.name || 'Unknown'})\n`
+  receiptText += `Payment: ${sale.payment_method || 'Unknown'} (${sale.cash_accounts?.account_name || 'Unknown'})\n`
   
   if (sale.customers?.name) {
     receiptText += `Customer: ${sale.customers.name}\n`
