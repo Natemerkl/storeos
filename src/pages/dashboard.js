@@ -2,6 +2,7 @@ import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
 import { getDashboardData } from '../utils/db.js'
 import { renderIcon } from '../components/icons.js'
+import { renderDateRangeSelector } from '../components/date-range-selector.js'
 
 export async function render(container) {
   const { currentStore, accountingView } = appStore.getState()
@@ -122,6 +123,10 @@ function buildSkeleton(currentStore, accountingView) {
         </div>
       </div>
       <div class="card" style="margin-top:1rem">
+        <div style="font-weight:600;margin-bottom:0.75rem;font-size:0.9375rem">Date Range</div>
+        <div id="date-range-container"></div>
+      </div>
+      <div class="card" style="margin-top:1rem">
         <div style="font-weight:600;margin-bottom:1rem">Recent Activity</div>
         <div id="activity-list">
           ${[1,2,3].map(() => `
@@ -173,6 +178,10 @@ function buildSkeleton(currentStore, accountingView) {
           <div class="skeleton" style="height:13px;width:45%;border-radius:4px"></div>
         </div>
       </div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div style="font-weight:600;margin-bottom:0.75rem;font-size:0.9375rem">Date Range</div>
+      <div id="date-range-container"></div>
     </div>
     <div class="card" style="margin-top:1rem">
       <div style="font-weight:600;margin-bottom:1rem">Recent Activity</div>
@@ -362,6 +371,12 @@ function fillDashboard(container, data, isStale) {
         import('../router.js').then(m => m.navigate(`/inventory?item=${itemId}`))
       })
     })
+
+  // Initialize date range selector
+  const dateRangeContainer = get('#date-range-container')
+  if (dateRangeContainer) {
+    renderDateRangeSelector(dateRangeContainer)
+  }
 
   // Fill recent activity (remove emojis, use colored circles)
   if (isStale?.()) return

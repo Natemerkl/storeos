@@ -14,7 +14,6 @@ import { appStore } from './store.js'
 import { renderNav } from './components/nav.js'
 import { initMobileNav } from './components/mobile-nav.js'
 import { initTableEnhancer } from './utils/mobile-tables.js'
-import { initDateRangeSelector } from './components/date-range-selector.js'
 
 const app = document.getElementById('app')
 let navEl         = null
@@ -97,23 +96,7 @@ export function buildLayout() {
 
   contentEl = document.createElement('main')
   contentEl.className = 'main-content'
-  
-  // Add date range selector container at top of main content
-  const dateRangeContainer = document.createElement('div')
-  dateRangeContainer.id = 'date-range-container'
-  dateRangeContainer.style.cssText = 'padding: 0.875rem 1.5rem 0; position: sticky; top: 0; z-index: 10; background: var(--bg-base);'
-  contentEl.appendChild(dateRangeContainer)
-  
-  // Add page content container
-  const pageContainer = document.createElement('div')
-  pageContainer.id = 'page-container'
-  pageContainer.style.cssText = 'padding: 0 1.5rem 1.5rem;'
-  contentEl.appendChild(pageContainer)
-  
   app.appendChild(contentEl)
-  
-  // Initialize date range selector
-  initDateRangeSelector(dateRangeContainer)
 
   if (!document.getElementById('mobile-nav')) {
     initMobileNav()
@@ -132,24 +115,20 @@ export async function loadPage(pageName) {
   if (isFullScreen) {
     buildFullScreen()
   } else {
-    if (!document.querySelector('.sidebar')) {
-      buildLayout()
+    if (!document.querySelector('.sidebar')) buildLayout()
+    showMobileNav()
+    if (contentEl && document.body.contains(contentEl)) {
+      contentEl.innerHTML = ''
     } else {
-      showMobileNav()
-      // Only clear the page container, not the entire contentEl (which has date range selector)
-      const pageContainer = document.getElementById('page-container')
-      if (pageContainer) {
-        pageContainer.innerHTML = ''
-      }
+      buildLayout()
     }
   }
 
   try {
     const mod = await import(`./pages/${pageName}.js`)
     // Verify container still valid before rendering
-    const pageContainer = document.getElementById('page-container') || contentEl
-    if (pageContainer && document.body.contains(pageContainer)) {
-      mod.render(pageContainer)
+    if (contentEl && document.body.contains(contentEl)) {
+      mod.render(contentEl)
     }
   } catch(err) {
     console.error('loadPage error:', pageName, err)
@@ -160,9 +139,8 @@ export async function loadPage(pageName) {
       window.location.reload()
     } else {
       sessionStorage.removeItem(key)
-      const pageContainer = document.getElementById('page-container') || contentEl
-      if (pageContainer && document.body.contains(pageContainer)) {
-        pageContainer.innerHTML = `
+      if (contentEl && document.body.contains(contentEl)) {
+        contentEl.innerHTML = `
           <div style="display:flex;flex-direction:column;align-items:center;
             justify-content:center;min-height:60vh;gap:1rem;padding:2rem;text-align:center">
             <div style="font-size:1.5rem">⚠️</div>
@@ -243,6 +221,22 @@ function goToAuth() {
   navigate('/auth')
 }
 
+// ── Service Worker Registration ───────────────────────────────
+function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((registration) => {
+          console.log('SW registered:', registration.scope);
+        })
+        .catch((error) => {
+          console.log('SW registration failed:', error);
+        });
+    });
+  }
+}
+
 // ── Main init — runs once on page load ─────────────────────
 async function init() {
   if (localStorage.getItem('storeos-mode') === 'lite') {
@@ -275,6 +269,9 @@ async function init() {
   appStore.getState().setUser(session.user)
   await goToApp(session.user)
 }
+
+// Register service worker after init
+registerServiceWorker()
 
 // ── Auth state listener ─────────────────────────────────────
 // Only handles changes AFTER init completes

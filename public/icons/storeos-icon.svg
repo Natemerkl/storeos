@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 680" width="512" height="512">
+<defs>
+  <clipPath id="rnd">
+    <rect x="90" y="90" width="500" height="500" rx="110" ry="110"/>
+  </clipPath>
+</defs>
+
+<rect x="90" y="90" width="500" height="500" rx="110" ry="110" fill="#00695C"/>
+
+<g clip-path="url(#rnd)" opacity="0.09">
+  <circle cx="190" cy="190" r="3" fill="white"/>
+  <circle cx="250" cy="190" r="3" fill="white"/>
+  <circle cx="310" cy="190" r="3" fill="white"/>
+  <circle cx="370" cy="190" r="3" fill="white"/>
+  <circle cx="430" cy="190" r="3" fill="white"/>
+  <circle cx="490" cy="190" r="3" fill="white"/>
+  <circle cx="190" cy="250" r="3" fill="white"/>
+  <circle cx="250" cy="250" r="3" fill="white"/>
+  <circle cx="310" cy="250" r="3" fill="white"/>
+  <circle cx="370" cy="250" r="3" fill="white"/>
+  <circle cx="430" cy="250" r="3" fill="white"/>
+  <circle cx="490" cy="250" r="3" fill="white"/>
+  <circle cx="190" cy="310" r="3" fill="white"/>
+  <circle cx="250" cy="310" r="3" fill="white"/>
+  <circle cx="310" cy="310" r="3" fill="white"/>
+  <circle cx="370" cy="310" r="3" fill="white"/>
+  <circle cx="430" cy="310" r="3" fill="white"/>
+  <circle cx="490" cy="310" r="3" fill="white"/>
+  <circle cx="190" cy="370" r="3" fill="white"/>
+  <circle cx="250" cy="370" r="3" fill="white"/>
+  <circle cx="310" cy="370" r="3" fill="white"/>
+  <circle cx="370" cy="370" r="3" fill="white"/>
+  <circle cx="430" cy="370" r="3" fill="white"/>
+  <circle cx="490" cy="370" r="3" fill="white"/>
+  <circle cx="190" cy="430" r="3" fill="white"/>
+  <circle cx="250" cy="430" r="3" fill="white"/>
+  <circle cx="310" cy="430" r="3" fill="white"/>
+  <circle cx="370" cy="430" r="3" fill="white"/>
+  <circle cx="430" cy="430" r="3" fill="white"/>
+  <circle cx="490" cy="430" r="3" fill="white"/>
+  <circle cx="190" cy="490" r="3" fill="white"/>
+  <circle cx="250" cy="490" r="3" fill="white"/>
+  <circle cx="310" cy="490" r="3" fill="white"/>
+  <circle cx="370" cy="490" r="3" fill="white"/>
+  <circle cx="430" cy="490" r="3" fill="white"/>
+  <circle cx="490" cy="490" r="3" fill="white"/>
+</g>
+
+<path d="M148 260 L148 188 L220 188" fill="none" stroke="white" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+<path d="M532 260 L532 188 L460 188" fill="none" stroke="white" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+<path d="M148 420 L148 492 L220 492" fill="none" stroke="white" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+<path d="M532 420 L532 492 L460 492" fill="none" stroke="white" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+
+<rect x="210" y="210" width="170" height="210" rx="10" ry="10" fill="white" opacity="0.12"/>
+<rect x="210" y="210" width="170" height="210" rx="10" ry="10" fill="none" stroke="white" stroke-width="10" stroke-opacity="0.8"/>
+
+<path d="M338 210 L338 242 L380 242" fill="none" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.6"/>
+
+<line x1="232" y1="270" x2="358" y2="270" stroke="white" stroke-width="9" stroke-linecap="round" stroke-opacity="0.55"/>
+<line x1="232" y1="296" x2="340" y2="296" stroke="white" stroke-width="9" stroke-linecap="round" stroke-opacity="0.35"/>
+<line x1="232" y1="322" x2="352" y2="322" stroke="white" stroke-width="9" stroke-linecap="round" stroke-opacity="0.55"/>
+<line x1="232" y1="348" x2="328" y2="348" stroke="white" stroke-width="9" stroke-linecap="round" stroke-opacity="0.35"/>
+<line x1="232" y1="374" x2="345" y2="374" stroke="white" stroke-width="9" stroke-linecap="round" stroke-opacity="0.55"/>
+<line x1="232" y1="400" x2="318" y2="400" stroke="white" stroke-width="9" stroke-linecap="round" stroke-opacity="0.35"/>
+
+<rect x="148" y="316" width="384" height="28" rx="4" fill="white" opacity="0.1"/>
+<line x1="148" y1="330" x2="532" y2="330" stroke="white" stroke-width="3" stroke-opacity="1"/>
+<circle cx="148" cy="330" r="6" fill="white" opacity="0.9"/>
+<circle cx="532" cy="330" r="6" fill="white" opacity="0.9"/>
+<line x1="165" y1="330" x2="185" y2="330" stroke="white" stroke-width="2" stroke-opacity="0.4" stroke-dasharray="4 6"/>
+<line x1="200" y1="330" x2="380" y2="330" stroke="white" stroke-width="2" stroke-opacity="0.4" stroke-dasharray="4 6"/>
+
+<line x1="392" y1="310" x2="442" y2="310" stroke="white" stroke-width="7" stroke-linecap="round" stroke-opacity="0.75"/>
+<path d="M434 298 L450 310 L434 322" fill="none" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.75"/>
+<line x1="392" y1="340" x2="442" y2="340" stroke="white" stroke-width="7" stroke-linecap="round" stroke-opacity="0.55"/>
+<path d="M434 328 L450 340 L434 352" fill="none" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.55"/>
+<line x1="392" y1="370" x2="432" y2="370" stroke="white" stroke-width="7" stroke-linecap="round" stroke-opacity="0.35"/>
+<path d="M424 358 L440 370 L424 382" fill="none" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.35"/>
+
+<rect x="454" y="270" width="78" height="18" rx="5" fill="white" opacity="0.85"/>
+<rect x="454" y="297" width="60" height="18" rx="5" fill="white" opacity="0.6"/>
+<rect x="454" y="324" width="72" height="18" rx="5" fill="white" opacity="0.85"/>
+<rect x="454" y="351" width="54" height="18" rx="5" fill="white" opacity="0.6"/>
+<rect x="454" y="378" width="68" height="18" rx="5" fill="white" opacity="0.85"/>
+<rect x="454" y="405" width="50" height="18" rx="5" fill="white" opacity="0.4"/>
+<line x1="450" y1="270" x2="450" y2="424" stroke="white" stroke-width="2" stroke-opacity="0.2"/>
+
+<circle cx="490" cy="262" r="12" fill="white" opacity="0.15"/>
+<path d="M482 262 L488 258 L493 268 L500 255" fill="none" stroke="#00897B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+<rect x="90" y="90" width="500" height="160" rx="110" ry="110" fill="white" opacity="0.07"/>
+<rect x="90" y="530" width="500" height="60" rx="0" fill="white" opacity="0.04" clip-path="url(#rnd)"/>
+<line x1="200" y1="555" x2="480" y2="555" stroke="white" stroke-width="3" stroke-linecap="round" stroke-opacity="0.12"/>
+</svg>

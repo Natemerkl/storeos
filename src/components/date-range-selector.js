@@ -54,23 +54,15 @@ export function renderDateRangeSelector(container) {
     <div id="date-range-selector" style="
       display: flex;
       align-items: center;
-      gap: 0.625rem;
-      padding: 0.625rem 0.875rem;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: 12px;
+      gap: 0.5rem;
       flex-wrap: wrap;
     ">
-      <div style="display: flex; align-items: center; gap: 0.375rem; color: var(--muted); font-size: 0.8125rem; font-weight: 600;">
-        ${renderIcon('calendar', 15)}
-        <span>Period:</span>
-      </div>
-      
       <select id="date-preset" class="form-input" style="
-        min-width: 130px;
         font-size: 0.8125rem;
-        padding: 0.375rem 0.625rem;
-        font-weight: 600;
+        padding: 0.4rem 0.5rem;
+        font-weight: 500;
+        border-radius: 6px;
+        min-width: 120px;
       ">
         ${PRESETS.map(p => `
           <option value="${p.value}" ${dateRange.preset === p.value ? 'selected' : ''}>
@@ -82,25 +74,15 @@ export function renderDateRangeSelector(container) {
       <div id="custom-dates" style="
         display: ${dateRange.preset === 'custom' ? 'flex' : 'none'};
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.375rem;
       ">
         <input type="date" id="start-date" class="form-input" 
           value="${dateRange.startDate}"
-          style="font-size: 0.8125rem; padding: 0.375rem 0.625rem; max-width: 150px;">
-        <span style="color: var(--muted); font-size: 0.75rem;">to</span>
+          style="font-size: 0.75rem; padding: 0.375rem 0.5rem; max-width: 130px; border-radius: 6px;">
+        <span style="color: var(--muted); font-size: 0.75rem;">→</span>
         <input type="date" id="end-date" class="form-input" 
           value="${dateRange.endDate}"
-          style="font-size: 0.8125rem; padding: 0.375rem 0.625rem; max-width: 150px;">
-      </div>
-      
-      <div style="
-        font-size: 0.75rem;
-        color: var(--muted);
-        padding: 0.25rem 0.625rem;
-        background: var(--bg-subtle);
-        border-radius: 6px;
-      ">
-        ${formatDateRangeLabel(dateRange)}
+          style="font-size: 0.75rem; padding: 0.375rem 0.5rem; max-width: 130px; border-radius: 6px;">
       </div>
     </div>
   `
