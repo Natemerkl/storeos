@@ -2,6 +2,7 @@ import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
 import { renderIcon } from '../components/icons.js'
 import { formatDate } from '../utils/format-date.js'
+import { initDateRangeSelector } from '../components/date-range-selector.js'
 
 console.log('sales-history.js loaded successfully!')
 
@@ -11,6 +12,8 @@ let allSales = []
 let filteredSales = []
 let cashAccounts = []
 let expandedSales = new Set()
+let isLoading = true
+let totalCount = 0
 
 export async function render(container) {
   console.log('sales-history render function called!')
@@ -42,9 +45,14 @@ export async function render(container) {
     <!-- Filters -->
     <div class="card" style="margin-bottom:1rem">
       <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center">
-        <input type="date" class="form-input" id="filter-from" value="${defaultFrom}" style="max-width:160px">
-        <span style="color:var(--muted);font-size:13px">to</span>
-        <input type="date" class="form-input" id="filter-to" value="${defaultTo}" style="max-width:160px">
+        <div id="date-range-container"></div>
+        
+        <select class="form-input" id="filter-type" style="max-width:120px">
+          <option value="">All Types</option>
+          <option value="pos">POS</option>
+          <option value="ocr">OCR</option>
+          <option value="credit">Credit</option>
+        </select>
         
         <select class="form-input" id="filter-account" style="max-width:160px">
           <option value="">All Payment Methods</option>
@@ -59,10 +67,12 @@ export async function render(container) {
 
     <!-- Sales list -->
     <div class="card">
+      <div id="sales-count" style="padding:0.75rem 1rem;border-bottom:1px solid var(--border);display:none">
+        <span style="font-weight:600;color:var(--dark)">Total Sales: </span>
+        <span style="color:var(--muted)">${totalCount}</span>
+      </div>
       <div id="sales-list">
-        <div style="text-align:center;padding:2rem;color:var(--muted)">
-          Loading sales...
-        </div>
+        ${renderSkeletonLoader()}
       </div>
       
       <!-- Load more button -->
@@ -72,26 +82,62 @@ export async function render(container) {
     </div>
   `
 
+  // Initialize date range selector
+  const dateRangeContainer = container.querySelector('#date-range-container')
+  initDateRangeSelector(dateRangeContainer)
+
   // Load initial sales
   await loadSales()
   renderSales()
 
   // Event listeners
-  container.querySelector('#filter-from').addEventListener('change', applyFilters)
-  container.querySelector('#filter-to').addEventListener('change', applyFilters)
+  container.querySelector('#filter-type').addEventListener('change', applyFilters)
   container.querySelector('#filter-account').addEventListener('change', applyFilters)
   container.querySelector('#filter-search').addEventListener('input', applyFilters)
   container.querySelector('#btn-clear-filters').addEventListener('click', clearFilters)
   container.querySelector('#btn-load-more').addEventListener('click', loadMore)
+  
+  // Listen for date range changes
+  window.addEventListener('dateRangeChanged', applyFilters)
+}
+
+function renderSkeletonLoader() {
+  return `
+    <div style="padding:1rem">
+      ${Array(5).fill(0).map(() => `
+        <div style="margin-bottom:1rem">
+          <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
+            <div style="width:40px;height:40px;background:var(--gray-200);border-radius:8px;animation:pulse 1.5s ease-in-out infinite"></div>
+            <div style="flex:1">
+              <div style="width:60%;height:16px;background:var(--gray-200);border-radius:4px;margin-bottom:0.5rem;animation:pulse 1.5s ease-in-out infinite"></div>
+              <div style="width:40%;height:12px;background:var(--gray-200);border-radius:4px;animation:pulse 1.5s ease-in-out infinite"></div>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <style>
+      @keyframes pulse {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 1; }
+      }
+    </style>
+  `
 }
 
 async function loadSales() {
-  const { currentStore, accountingView, stores } = appStore.getState()
+  isLoading = true
+  const container = document.querySelector('#sales-list')
+  if (container) {
+    container.innerHTML = renderSkeletonLoader()
+  }
+  
+  const { currentStore, accountingView, stores, dateRange } = appStore.getState()
   const storeIds = accountingView === 'joint' ? stores.map(s => s.id) : [currentStore?.id]
   console.log('Loading sales for store IDs:', storeIds)
 
-  // First load basic sales with cash accounts
-  const { data: sales, error } = await supabase
+  // Use the optimized single query with JSON aggregation
+  const { data: sales, error, count } = await supabase
     .from('sales')
     .select(`
       id,
@@ -106,101 +152,85 @@ async function loadSales() {
       created_at,
       customer_id,
       customer_note,
-      cash_accounts(account_name)
-    `)
-    .in('store_id', storeIds)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    console.error('Error loading sales:', error)
-    return
-  }
-
-  console.log('Loaded sales:', sales)
-
-  // Load store names separately
-  const { data: storeData } = await supabase
-    .from('stores')
-    .select('id, name')
-    .in('id', storeIds)
-
-  console.log('Loaded store data:', storeData)
-
-  // Load customer data for sales that have customers
-  const customerIds = sales?.filter(s => s.customer_id).map(s => s.customer_id) || []
-  const { data: customerData } = await supabase
-    .from('customers')
-    .select('id, name, phone')
-    .in('id', customerIds)
-
-  console.log('Loaded customer data:', customerData)
-
-  // Attach store and customer data
-  if (sales) {
-    sales.forEach(sale => {
-      sale.stores = storeData?.find(s => s.id === sale.store_id)
-      sale.customers = customerData?.find(c => c.id === sale.customer_id)
-    })
-  }
-
-  // Then load sale items for each sale
-  if (sales && sales.length > 0) {
-    const saleIds = sales.map(s => s.id)
-    console.log('Loading items for sale IDs:', saleIds)
-    const { data: items, error: itemsError } = await supabase
-      .from('sale_items')
-      .select(`
-        sale_id,
+      transport_fee,
+      delivery_place,
+      targa,
+      payment_bank,
+      cash_accounts(account_name),
+      customers(name, phone),
+      stores!inner(name),
+      credit_sales!left(
+        customer_id,
+        amount_owed,
+        status,
+        customers(
+          name,
+          phone
+        )
+      ),
+      sale_items(
         item_name_snapshot,
         quantity,
         unit_price,
         subtotal
-      `)
-      .in('sale_id', saleIds)
+      )
+    `, { count: 'exact' })
+    .in('store_id', storeIds)
+    .gte('created_at', `${dateRange.startDate}T00:00:00Z`)
+    .lte('created_at', `${dateRange.endDate}T23:59:59Z`)
+    .order('created_at', { ascending: false })
+    .limit(pageSize)
 
-    if (itemsError) {
-      console.error('Error loading sale items:', itemsError)
-    } else {
-      console.log('Loaded sale items:', items)
-      
-      // Group items by sale_id
-      const itemsBySale = (items || []).reduce((acc, item) => {
-        if (!acc[item.sale_id]) acc[item.sale_id] = []
-        acc[item.sale_id].push(item)
-        return acc
-      }, {})
-
-      console.log('Items grouped by sale:', itemsBySale)
-
-      // Attach items to sales
-      sales.forEach(sale => {
-        sale.sale_items = itemsBySale[sale.id] || []
-        console.log('Sale', sale.id, 'has items:', sale.sale_items)
-      })
+  if (error) {
+    console.error('Error loading sales:', error)
+    isLoading = false
+    if (container) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:2rem;color:var(--accent)">
+          ${renderIcon('alertCircle', 32, 'var(--accent)')}
+          <div style="margin-top:0.75rem">Error loading sales</div>
+        </div>
+      `
     }
+    return
   }
 
+  console.log('Loaded sales:', sales)
   allSales = sales || []
-  console.log('Final allSales data:', allSales)
+  totalCount = count || 0
+  isLoading = false
   applyFilters()
 }
 
 function applyFilters() {
-  const fromDate = document.querySelector('#filter-from')?.value
-  const toDate = document.querySelector('#filter-to')?.value
+  const { dateRange } = appStore.getState()
+  const typeId = document.querySelector('#filter-type')?.value
   const accountId = document.querySelector('#filter-account')?.value
   const searchText = document.querySelector('#filter-search')?.value.toLowerCase()
 
   filteredSales = allSales.filter(sale => {
     const saleDate = sale.created_at?.split('T')[0]
-    const dateMatch = (!fromDate || saleDate >= fromDate) && (!toDate || saleDate <= toDate)
-    const accountMatch = !accountId || sale.cash_account_id === accountId
+    const dateMatch = (!dateRange.startDate || saleDate >= dateRange.startDate) && (!dateRange.endDate || saleDate <= dateRange.endDate)
+    
+    let typeMatch = true
+    if (typeId === 'pos') {
+      typeMatch = sale.source === 'manual' && sale.payment_method !== 'credit'
+    } else if (typeId === 'ocr') {
+      typeMatch = sale.source === 'ocr'
+    } else if (typeId === 'credit') {
+      typeMatch = sale.payment_method === 'credit'
+    }
+    
+    const accountMatch = !accountId || (sale.cash_account_id && sale.cash_account_id === accountId)
+    const customerName = sale.customers?.name || sale.credit_sales?.[0]?.customers?.name
+    
     const searchMatch = !searchText || 
       sale.id.toString().includes(searchText) ||
       sale.total_amount.toString().includes(searchText) ||
-      sale.cash_accounts?.account_name?.toLowerCase().includes(searchText)
+      sale.cash_accounts?.account_name?.toLowerCase().includes(searchText) ||
+      customerName?.toLowerCase().includes(searchText)
 
-    return dateMatch && accountMatch && searchMatch
+    return dateMatch && typeMatch && accountMatch && searchMatch
   })
 
   currentPage = 1
@@ -209,11 +239,17 @@ function applyFilters() {
 }
 
 function clearFilters() {
+  const { setDateRange } = appStore.getState()
   const today = new Date()
   const thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000))
   
-  document.querySelector('#filter-from').value = thirtyDaysAgo.toISOString().split('T')[0]
-  document.querySelector('#filter-to').value = today.toISOString().split('T')[0]
+  setDateRange({
+    startDate: thirtyDaysAgo.toISOString().split('T')[0],
+    endDate: today.toISOString().split('T')[0],
+    preset: 'last30days'
+  })
+  
+  document.querySelector('#filter-type').value = ''
   document.querySelector('#filter-account').value = ''
   document.querySelector('#filter-search').value = ''
   
@@ -223,8 +259,21 @@ function clearFilters() {
 function renderSales() {
   const container = document.querySelector('#sales-list')
   const loadMoreContainer = document.querySelector('#load-more-container')
+  const salesCountContainer = document.querySelector('#sales-count')
   
   if (!container) return
+
+  // Show loading state
+  if (isLoading) {
+    container.innerHTML = renderSkeletonLoader()
+    loadMoreContainer.style.display = 'none'
+    salesCountContainer.style.display = 'none'
+    return
+  }
+
+  // Show total count
+  salesCountContainer.style.display = 'block'
+  salesCountContainer.querySelector('span:last-child').textContent = totalCount
 
   const startIndex = 0
   const endIndex = currentPage * pageSize
@@ -278,8 +327,15 @@ function renderSales() {
     html += '<span style="font-weight:600;color:var(--dark)">' + productDisplay + '</span>'
     html += '<span style="font-size:0.875rem;color:var(--muted)">' + dateTime + '</span>'
     html += '</div>'
+    const customerName = sale.customers?.name || sale.credit_sales?.[0]?.customers?.name
+    
     html += '<div style="display:flex;align-items:center;gap:0.5rem">'
-    html += '<span class="badge badge-grey">' + (sale.cash_accounts?.account_name || 'Unknown') + '</span>'
+    html += '<span class="badge badge-grey">' + (sale.cash_accounts?.account_name || (sale.payment_method === 'credit' ? 'Credit Account' : 'Unknown')) + '</span>'
+    html += '<span class="badge badge-' + (sale.source === 'ocr' ? 'blue' : sale.payment_method === 'credit' ? 'orange' : 'green') + '">'
+    html += (sale.source === 'ocr' ? 'OCR' : sale.payment_method === 'credit' ? 'Credit' : 'POS') + '</span>'
+    if (customerName) {
+      html += '<span class="badge badge-blue">' + customerName + '</span>'
+    }
     html += '<span style="font-weight:700;color:var(--accent);font-size:1.0625rem">'
     html += fmt(sale.total_amount) + ' ETB'
     html += '</span>'
@@ -309,10 +365,115 @@ function renderSales() {
     html += 'background:var(--bg-subtle);'
     html += '">'
     html += '<div style="padding:1rem">'
-    html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--muted)">Sale Items</div>'
-    html += '<div id="items-loading-' + sale.id + '" style="text-align:center;padding:1rem;color:var(--muted)">'
-    html += 'Loading items...'
-    html += '</div>'
+    
+    if (isExpanded && sale.sale_items && sale.sale_items.length > 0) {
+      html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Sale Details</div>'
+      
+      // Customer Information Section
+      const customerName = sale.customers?.name || sale.credit_sales?.[0]?.customers?.name
+      const customerPhone = sale.customers?.phone || sale.credit_sales?.[0]?.customers?.phone
+      
+      if (customerName || sale.customer_note) {
+        html += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
+        html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Customer Information</div>'
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
+        
+        if (customerName) {
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Name</div><div style="font-weight:500">' + customerName + '</div></div>'
+        }
+        if (customerPhone) {
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Phone</div><div style="font-weight:500">' + customerPhone + '</div></div>'
+        }
+        if (sale.credit_sales?.[0]) {
+          const creditInfo = sale.credit_sales[0]
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Credit Status</div><div style="font-weight:500">' + creditInfo.status + '</div></div>'
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Amount Owed</div><div style="font-weight:600;color:var(--accent)">' + fmt(creditInfo.amount_owed) + ' ETB</div></div>'
+        }
+        if (sale.customer_note) {
+          html += '<div style="grid-column:1/-1"><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Customer Note</div><div style="font-weight:500">' + sale.customer_note + '</div></div>'
+        }
+        
+        html += '</div></div>'
+      }
+      
+      // Delivery Information Section
+      if (sale.targa || sale.delivery_place || sale.transport_fee && parseFloat(sale.transport_fee) > 0) {
+        html += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
+        html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Delivery Information</div>'
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
+        
+        if (sale.targa) {
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Plate Number</div><div style="font-weight:500">' + sale.targa + '</div></div>'
+        }
+        if (sale.delivery_place) {
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Delivery Place</div><div style="font-weight:500">' + sale.delivery_place + '</div></div>'
+        }
+        if (sale.transport_fee && parseFloat(sale.transport_fee) > 0) {
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Transport Fee</div><div style="font-weight:600;color:var(--accent)">' + fmt(sale.transport_fee) + ' ETB</div></div>'
+        }
+        
+        html += '</div></div>'
+      }
+      
+      // Payment Information Section
+      html += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
+      html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Payment Information</div>'
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
+      
+      html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Payment Method</div><div style="font-weight:500">' + (sale.payment_method || 'Unknown') + '</div></div>'
+      if (sale.payment_bank) {
+        html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Bank</div><div style="font-weight:500">' + sale.payment_bank + '</div></div>'
+      }
+      html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Account</div><div style="font-weight:500">' + (sale.cash_accounts?.account_name || (sale.payment_method === 'credit' ? 'Credit Account' : 'Unknown')) + '</div></div>'
+      html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Total Amount</div><div style="font-weight:600;color:var(--accent)">' + fmt(sale.total_amount) + ' ETB</div></div>'
+      
+      html += '</div></div>'
+      
+      // Sale Items Section
+      html += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;border:1px solid var(--border)">'
+      html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Sale Items (' + sale.sale_items.length + ')</div>'
+      
+      html += sale.sale_items.map(item => 
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0;border-bottom:1px solid var(--border)">' +
+          '<div style="flex:1">' +
+            '<div style="font-weight:500">' + (item.item_name_snapshot || 'Unknown Item') + '</div>' +
+            '<div style="font-size:0.875rem;color:var(--muted)">Qty: ' + item.quantity + ' × ' + fmt(item.unit_price) + ' ETB</div>' +
+          '</div>' +
+          '<div style="font-weight:600;color:var(--dark)">' +
+            fmt(item.subtotal || (item.unit_price * item.quantity)) + ' ETB' +
+          '</div>' +
+        '</div>'
+      ).join('')
+      
+      html += '</div>'
+      
+      // Additional Information Section
+      if (sale.notes || sale.ocr_log_id) {
+        html += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-top:1rem;border:1px solid var(--border)">'
+        html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Additional Information</div>'
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
+        
+        html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Sale ID</div><div style="font-weight:500;font-family:monospace;font-size:0.8125rem">' + sale.id + '</div></div>'
+        html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Store</div><div style="font-weight:500">' + (sale.stores?.name || 'Unknown') + '</div></div>'
+        html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Source</div><div style="font-weight:500">' + (sale.source || 'Unknown') + '</div></div>'
+        html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Created At</div><div style="font-weight:500">' + new Date(sale.created_at).toLocaleString() + '</div></div>'
+        
+        if (sale.ocr_log_id) {
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">OCR Processed</div><div style="font-weight:500">Yes</div></div>'
+        }
+        
+        if (sale.notes) {
+          html += '<div style="grid-column:1/-1"><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Notes</div><div style="font-weight:500">' + sale.notes + '</div></div>'
+        }
+        
+        html += '</div></div>'
+      }
+    } else if (isExpanded) {
+      html += '<div style="color:var(--muted)">No items found</div>'
+    } else {
+      html += '<div style="color:var(--muted)">Tap to view details</div>'
+    }
+    
     html += '</div>'
     html += '</div>'
     html += '</div>'
@@ -333,109 +494,14 @@ async function loadMore() {
 window.toggleSaleItems = async function(saleId) {
   console.log('toggleSaleItems called with saleId:', saleId)
   const isExpanded = expandedSales.has(saleId)
-  console.log('isExpanded:', isExpanded)
   
   if (isExpanded) {
     expandedSales.delete(saleId)
-    console.log('Collapsing sale')
-    renderSales()
   } else {
     expandedSales.add(saleId)
-    console.log('Expanding sale')
-    
-    // Find the sale with its items (already loaded)
-    const sale = allSales.find(s => s.id === saleId)
-    console.log('Found sale:', sale)
-    const itemsContainer = document.getElementById(`items-loading-${saleId}`)
-    console.log('Items container:', itemsContainer)
-    
-    if (itemsContainer && sale) {
-      const items = sale.sale_items || []
-      console.log('Sale items:', items)
-      
-      if (!items || items.length === 0) {
-        itemsContainer.innerHTML = '<div style="color:var(--muted)">No items found</div>'
-      } else {
-        // Build comprehensive sale details using string concatenation
-        let detailsHtml = '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
-        detailsHtml += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Sale Details</div>'
-        detailsHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
-        
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Store</div><div style="font-weight:500">' + (sale.stores?.name || 'Unknown') + '</div></div>'
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Payment Method</div><div style="font-weight:500">' + (sale.payment_method || 'Unknown') + '</div></div>'
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Source</div><div style="font-weight:500">' + (sale.source || 'Unknown') + '</div></div>'
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Sale Date</div><div style="font-weight:500">' + (sale.sale_date || 'Unknown') + '</div></div>'
-        
-        detailsHtml += '</div></div>'
-
-        // Customer Information
-        detailsHtml += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
-        detailsHtml += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Customer Information</div>'
-        detailsHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
-        
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Name</div><div style="font-weight:500">' + (sale.customers?.name || 'No customer') + '</div></div>'
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Phone</div><div style="font-weight:500">' + (sale.customers?.phone || 'Not provided') + '</div></div>'
-        
-        if (sale.customer_note) {
-          detailsHtml += '<div style="grid-column:1/-1"><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Customer Note</div><div style="font-weight:500">' + sale.customer_note + '</div></div>'
-        }
-        
-        detailsHtml += '</div></div>'
-
-        // Account Information
-        detailsHtml += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
-        detailsHtml += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Account Information</div>'
-        detailsHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
-        
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Cash Account</div><div style="font-weight:500">' + (sale.cash_accounts?.account_name || 'Unknown') + '</div></div>'
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Total Amount</div><div style="font-weight:600;color:var(--accent)">' + fmt(sale.total_amount) + ' ETB</div></div>'
-        
-        detailsHtml += '</div></div>'
-
-        // Additional Information
-        detailsHtml += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
-        detailsHtml += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Additional Information</div>'
-        detailsHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
-        
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Sale ID</div><div style="font-weight:500;font-family:monospace;font-size:0.8125rem">' + sale.id + '</div></div>'
-        detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Created At</div><div style="font-weight:500">' + new Date(sale.created_at).toLocaleString() + '</div></div>'
-        
-        if (sale.ocr_log_id) {
-          detailsHtml += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">OCR Processed</div><div style="font-weight:500">Yes</div></div>'
-        }
-        
-        if (sale.notes) {
-          detailsHtml += '<div style="grid-column:1/-1"><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Notes</div><div style="font-weight:500">' + sale.notes + '</div></div>'
-        }
-        
-        detailsHtml += '</div></div>'
-
-        // Items List
-        detailsHtml += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;border:1px solid var(--border)">'
-        detailsHtml += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Sale Items (' + items.length + ')</div>'
-
-        const itemsHtml = items.map(item => 
-          '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0;border-bottom:1px solid var(--border)">' +
-            '<div style="flex:1">' +
-              '<div style="font-weight:500">' + (item.item_name_snapshot || 'Unknown Item') + '</div>' +
-              '<div style="font-size:0.875rem;color:var(--muted)">Qty: ' + item.quantity + ' × ' + fmt(item.unit_price) + ' ETB</div>' +
-            '</div>' +
-            '<div style="font-weight:600;color:var(--dark)">' +
-              fmt(item.subtotal || (item.unit_price * item.quantity)) + ' ETB' +
-            '</div>' +
-          '</div>'
-        ).join('')
-
-        detailsHtml += itemsHtml + '</div>'
-        console.log('Setting innerHTML')
-        itemsContainer.innerHTML = detailsHtml
-      }
-    } else {
-      console.log('Missing itemsContainer or sale')
-    }
-    
-    renderSales()
   }
+  
+  renderSales()
 }
 
 window.shareReceipt = async function(saleId) {
@@ -456,21 +522,51 @@ window.shareReceipt = async function(saleId) {
   receiptText += `Receipt #: ${sale.id}\n`
   receiptText += `Date: ${dateTime}\n`
   receiptText += `Store: ${sale.stores?.name || 'Unknown'}\n`
-  receiptText += `Payment: ${sale.payment_method || 'Unknown'} (${sale.cash_accounts?.account_name || 'Unknown'})\n`
+  receiptText += `Payment: ${sale.payment_method || 'Unknown'}\n`
   
-  if (sale.customers?.name) {
-    receiptText += `Customer: ${sale.customers.name}\n`
-    if (sale.customers?.phone) {
-      receiptText += `Phone: ${sale.customers.phone}\n`
-    }
+  if (sale.payment_bank) {
+    receiptText += `Bank: ${sale.payment_bank}\n`
   }
+  
+  receiptText += `Account: ${sale.cash_accounts?.account_name || (sale.payment_method === 'credit' ? 'Credit Account' : 'Unknown')}\n`
+  
+    const customerName = sale.customers?.name || sale.credit_sales?.[0]?.customers?.name
+    
+    if (sale.customers?.name) {
+      receiptText += `Name: ${sale.customers.name}\n`
+      if (sale.customers?.phone) {
+        receiptText += `Phone: ${sale.customers.phone}\n`
+      }
+    } else if (customerName) {
+      receiptText += `Name: ${customerName}\n`
+      if (customerPhone) {
+        receiptText += `Phone: ${customerPhone}\n`
+      }
+      const creditInfo = sale.credit_sales[0]
+      receiptText += `Credit Status: ${creditInfo.status}\n`
+      receiptText += `Amount Owed: ${fmt(creditInfo.amount_owed)} ETB\n`
+    }
   
   if (sale.customer_note) {
     receiptText += `Customer Note: ${sale.customer_note}\n`
   }
   
-  receiptText += `Source: ${sale.source || 'Unknown'}\n`
-  receiptText += `----------------\n`
+  if (sale.targa || sale.delivery_place || (sale.transport_fee && parseFloat(sale.transport_fee) > 0)) {
+    receiptText += `\n🚚 Delivery Information\n`
+    receiptText += `-------------------\n`
+    if (sale.targa) {
+      receiptText += `Plate Number: ${sale.targa}\n`
+    }
+    if (sale.delivery_place) {
+      receiptText += `Delivery Place: ${sale.delivery_place}\n`
+    }
+    if (sale.transport_fee && parseFloat(sale.transport_fee) > 0) {
+      receiptText += `Transport Fee: ${fmt(sale.transport_fee)} ETB\n`
+    }
+  }
+  
+  receiptText += `\n📦 Sale Items\n`
+  receiptText += `------------\n`
 
   if (items && items.length > 0) {
     items.forEach(item => {
@@ -480,13 +576,23 @@ window.shareReceipt = async function(saleId) {
     })
   }
 
-  receiptText += `----------------\n`
+  receiptText += `\n----------------\n`
   receiptText += `TOTAL: ${fmt(sale.total_amount)} ETB\n`
   
-  if (sale.notes) {
-    receiptText += `Notes: ${sale.notes}\n`
+  if (sale.transport_fee && parseFloat(sale.transport_fee) > 0) {
+    receiptText += `Transport Fee: ${fmt(sale.transport_fee)} ETB\n`
+    receiptText += `Grand Total: ${fmt(parseFloat(sale.total_amount) + parseFloat(sale.transport_fee))} ETB\n`
   }
   
+  if (sale.notes) {
+    receiptText += `\n📝 Notes: ${sale.notes}\n`
+  }
+  
+  if (sale.ocr_log_id) {
+    receiptText += `\n🔍 OCR Processed: Yes\n`
+  }
+  
+  receiptText += `Source: ${sale.source || 'Unknown'}\n`
   receiptText += `================\n`
   receiptText += `Thank you for your purchase! 🛍️`
 

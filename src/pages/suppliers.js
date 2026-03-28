@@ -26,9 +26,9 @@ export async function render(container) {
         <div class="kpi-sub">active</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Total Purchases</div>
-        <div class="kpi-value" id="total-purchases">0</div>
-        <div class="kpi-sub">all time</div>
+        <div class="kpi-label">Outstanding</div>
+        <div class="kpi-value" id="total-outstanding" style="color:var(--danger)">0</div>
+        <div class="kpi-sub">ETB owed</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">This Month</div>
@@ -36,9 +36,9 @@ export async function render(container) {
         <div class="kpi-sub">ETB spent</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Top Supplier</div>
-        <div class="kpi-value" id="top-vendor" style="font-size:1rem">—</div>
-        <div class="kpi-sub">by volume</div>
+        <div class="kpi-label">Over 60 Days</div>
+        <div class="kpi-value" id="overdue-60" style="color:var(--danger)">0</div>
+        <div class="kpi-sub">ETB overdue</div>
       </div>
     </div>
 
@@ -62,14 +62,13 @@ export async function render(container) {
               <th>Contact Person</th>
               <th>Phone</th>
               <th>Email</th>
-              <th>Total Purchases</th>
-              <th>Total Spent</th>
-              <th>Last Purchase</th>
+              <th>Outstanding Balance</th>
+              <th>Aging</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="vendors-body">
-            <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr>
+            <tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--muted)">Loading...</td></tr>
           </tbody>
         </table>
       </div>
@@ -115,14 +114,14 @@ export async function render(container) {
       </div>
     </div>
 
-    <!-- Purchase History Modal -->
-    <div id="history-modal" class="modal-overlay" style="display:none">
-      <div class="modal" style="max-width:800px">
+    <!-- Supplier Detail Modal -->
+    <div id="supplier-detail-modal" class="modal-overlay" style="display:none">
+      <div class="modal" style="max-width:900px">
         <div class="modal-header">
-          <div class="modal-title" id="history-title">Purchase History</div>
-          <button class="modal-close" id="history-close">${renderIcon('close', 14)}</button>
+          <div class="modal-title" id="detail-title">Supplier Details</div>
+          <button class="modal-close" id="detail-close">${renderIcon('close', 14)}</button>
         </div>
-        <div id="history-content">
+        <div id="detail-content">
           <div style="text-align:center;padding:2rem;color:var(--muted)">Loading...</div>
         </div>
       </div>
@@ -131,17 +130,33 @@ export async function render(container) {
 
   let allVendors = []
   let allPurchases = []
+  let allVendorDebts = []
+  let allVendorPayments = []
+  let allStockMovements = []
+  let cashAccounts = []
   let editingId = null
 
   // ── Load Data ──────────────────────────────────────────────
   async function loadVendors() {
-    const [{ data: vendors }, { data: purchases }] = await Promise.all([
+    const [{ data: vendors }, { data: purchases }, { data: vendorDebts }, { data: stockMovements }] = await Promise.all([
       supabase.from('vendors').select('*').in('store_id', storeIds).order('vendor_name'),
-      supabase.from('vendor_purchases').select('*').in('store_id', storeIds).order('purchase_date', { ascending: false })
+      supabase.from('vendor_purchases').select('*').in('store_id', storeIds).order('purchase_date', { ascending: false }),
+      supabase.from('vendor_debts').select('*').in('store_id', storeIds).order('created_at', { ascending: false }),
+      supabase.from('stock_movements').select('*').in('store_id', storeIds).eq('source', 'credit').order('created_at', { ascending: false })
     ])
+
+    // Load vendor payments
+    const { data: vendorPayments } = await supabase.from('vendor_payments').select('*')
+    allVendorPayments = vendorPayments || []
+
+    // Load cash accounts for payment modal
+    const { data: accounts } = await supabase.from('cash_accounts').select('*').in('store_id', storeIds)
+    cashAccounts = accounts || []
 
     allVendors = vendors || []
     allPurchases = purchases || []
+    allVendorDebts = vendorDebts || []
+    allStockMovements = stockMovements || []
 
     updateSummary()
     applyFilters()
@@ -154,18 +169,27 @@ export async function render(container) {
     const monthPurchases = allPurchases.filter(p => p.purchase_date >= monthStart)
     const monthAmount = monthPurchases.reduce((s, p) => s + Number(p.total_cost), 0)
 
-    // Count purchases per vendor
-    const vendorCounts = {}
-    allPurchases.forEach(p => {
-      vendorCounts[p.vendor_id] = (vendorCounts[p.vendor_id] || 0) + 1
+    // Calculate outstanding balances and aging
+    let totalOutstanding = 0
+    let overdue60Days = 0
+    const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000))
+    const sixtyDaysAgo = new Date(now.getTime() - (60 * 24 * 60 * 60 * 1000))
+
+    allVendorDebts.forEach(debt => {
+      if (debt.status !== 'paid') {
+        const remaining = Number(debt.amount_owed) - Number(debt.amount_paid)
+        totalOutstanding += remaining
+        
+        if (new Date(debt.created_at) < sixtyDaysAgo) {
+          overdue60Days += remaining
+        }
+      }
     })
-    const topVendorId = Object.entries(vendorCounts).sort((a,b) => b[1]-a[1])[0]?.[0]
-    const topVendor = allVendors.find(v => v.id === topVendorId)
 
     container.querySelector('#total-vendors').textContent = allVendors.length
-    container.querySelector('#total-purchases').textContent = allPurchases.length
+    container.querySelector('#total-outstanding').textContent = fmt(totalOutstanding)
     container.querySelector('#month-amount').textContent = fmt(monthAmount)
-    container.querySelector('#top-vendor').textContent = topVendor?.vendor_name || '—'
+    container.querySelector('#overdue-60').textContent = fmt(overdue60Days)
   }
 
   function applyFilters() {
@@ -183,14 +207,14 @@ export async function render(container) {
   function renderTable(vendors) {
     const tbody = container.querySelector('#vendors-body')
     if (vendors.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">📦</div><div class="empty-text">No suppliers yet. Add your first supplier.</div></div></td></tr>`
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">📦</div><div class="empty-text">No suppliers yet. Add your first supplier.</div></div></td></tr>`
       return
     }
 
     tbody.innerHTML = vendors.map(v => {
-      const purchases = allPurchases.filter(p => p.vendor_id === v.id)
-      const totalSpent = purchases.reduce((s, p) => s + Number(p.total_cost), 0)
-      const lastPurchase = purchases[0]?.purchase_date || null
+      const debts = allVendorDebts.filter(d => d.vendor_name === v.vendor_name)
+      const outstanding = debts.reduce((s, d) => s + (Number(d.amount_owed) - Number(d.amount_paid)), 0)
+      const aging = getAging(debts)
 
       return `
         <tr>
@@ -198,13 +222,14 @@ export async function render(container) {
           <td>${v.contact_person || '—'}</td>
           <td>${v.phone || '—'}</td>
           <td style="color:var(--muted);font-size:0.875rem">${v.email || '—'}</td>
-          <td><span class="badge badge-grey">${purchases.length} orders</span></td>
-          <td style="font-weight:600;color:var(--accent)">${fmt(totalSpent)} ETB</td>
-          <td>${lastPurchase ? formatDate(lastPurchase) : '—'}</td>
+          <td style="font-weight:600;color:${outstanding > 0 ? 'var(--danger)' : 'var(--accent)'}">
+            ${outstanding > 0 ? fmt(outstanding) + ' ETB' : '✓ Paid'}
+          </td>
+          <td>${aging}</td>
           <td>
             <div style="display:flex;gap:0.4rem">
-              <button class="btn btn-outline btn-sm" data-action="history" data-id="${v.id}" data-name="${v.vendor_name}">
-                ${renderIcon('reports', 13)} History
+              <button class="btn btn-outline btn-sm" data-action="detail" data-id="${v.id}" data-name="${v.vendor_name}">
+                ${renderIcon('eye', 13)} Details
               </button>
               <button class="btn btn-outline btn-sm" data-action="edit" data-id="${v.id}">Edit</button>
               <button class="btn btn-sm" style="color:var(--danger);border:1px solid var(--border)" data-action="delete" data-id="${v.id}">Delete</button>
@@ -219,8 +244,390 @@ export async function render(container) {
         const { action, id, name } = btn.dataset
         if (action === 'edit') openEditModal(id)
         if (action === 'delete') deleteVendor(id)
-        if (action === 'history') openHistoryModal(id, name)
+        if (action === 'detail') openSupplierDetail(id, name)
       })
+    })
+  }
+
+  function getAging(debts) {
+    if (debts.length === 0) return '<span class="badge badge-green">No Debt</span>'
+    
+    const now = new Date()
+    let hasUnder30 = false
+    let has30to60 = false
+    let hasOver60 = false
+    
+    debts.forEach(debt => {
+      if (debt.status === 'paid') return
+      const daysOld = Math.floor((now - new Date(debt.created_at)) / (1000 * 60 * 60 * 24))
+      if (daysOld < 30) hasUnder30 = true
+      else if (daysOld < 60) has30to60 = true
+      else hasOver60 = true
+    })
+
+    let badges = []
+    if (hasUnder30) badges.push('<span class="badge badge-green">&lt;30d</span>')
+    if (has30to60) badges.push('<span class="badge badge-yellow">30-60d</span>')
+    if (hasOver60) badges.push('<span class="badge badge-red">&gt;60d</span>')
+    
+    return badges.join(' ')
+  }
+
+  // ── Supplier Detail Modal ───────────────────────────────────
+  async function openSupplierDetail(vendorId, vendorName) {
+    const modal = container.querySelector('#supplier-detail-modal')
+    const titleEl = container.querySelector('#detail-title')
+    const contentEl = container.querySelector('#detail-content')
+
+    titleEl.textContent = `Supplier Details — ${vendorName}`
+    modal.style.display = 'flex'
+
+    const vendor = allVendors.find(v => v.id === vendorId)
+    const debts = allVendorDebts.filter(d => d.vendor_name === vendorName)
+    const payments = allVendorPayments.filter(p => {
+      // Find vendor by name since payments use vendor_id
+      const paymentVendor = allVendors.find(v => v.id === p.vendor_id)
+      return paymentVendor?.vendor_name === vendorName
+    })
+    const creditPurchases = allStockMovements.filter(sm => {
+      // Match by reference_id if it points to a vendor debt
+      return debts.some(d => d.id === sm.reference_id)
+    })
+
+    const outstanding = debts.reduce((s, d) => s + (Number(d.amount_owed) - Number(d.amount_paid)), 0)
+    const aging = calculateAgingBreakdown(debts)
+
+    contentEl.innerHTML = `
+      <!-- Supplier Header -->
+      <div style="background:var(--bg-subtle);border-radius:12px;padding:1.25rem;margin-bottom:1.25rem">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem">
+          <div>
+            <h3 style="margin:0 0 0.5rem 0;color:var(--dark)">${vendorName}</h3>
+            ${vendor?.contact_person ? `<div style="color:var(--muted);font-size:0.875rem">Contact: ${vendor.contact_person}</div>` : ''}
+            ${vendor?.phone ? `<div style="color:var(--muted);font-size:0.875rem">📞 ${vendor.phone}</div>` : ''}
+            ${vendor?.email ? `<div style="color:var(--muted);font-size:0.875rem">📧 ${vendor.email}</div>` : ''}
+            ${vendor?.address ? `<div style="color:var(--muted);font-size:0.875rem">📍 ${vendor.address}</div>` : ''}
+          </div>
+          <button class="btn btn-primary btn-sm" id="pay-supplier-btn" data-vendor-name="${vendorName}">
+            ${renderIcon('creditCard', 14)} Pay Supplier
+          </button>
+        </div>
+        
+        <!-- Financial Summary -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
+          <div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Outstanding Balance</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--danger)">${fmt(outstanding)} ETB</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Total Purchases</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--dark)">${debts.length}</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Payments Made</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--accent)">${payments.length}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Aging Breakdown -->
+      ${aging.total > 0 ? `
+        <div style="background:var(--bg-subtle);border-radius:12px;padding:1.25rem;margin-bottom:1.25rem">
+          <div style="font-weight:600;margin-bottom:1rem;color:var(--dark)">Aging Breakdown</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
+            <div style="text-align:center;padding:1rem;background:#F0FDF4;border:1px solid #22C55E;border-radius:8px">
+              <div style="font-size:1.25rem;font-weight:700;color:#22C55E">${fmt(aging.under30)}</div>
+              <div style="font-size:0.75rem;color:#166534">&lt; 30 days</div>
+            </div>
+            <div style="text-align:center;padding:1rem;background:#FFFBEB;border:1px solid #F59E0B;border-radius:8px">
+              <div style="font-size:1.25rem;font-weight:700;color:#D97706">${fmt(aging.thirtyTo60)}</div>
+              <div style="font-size:0.75rem;color:#92400E">30-60 days</div>
+            </div>
+            <div style="text-align:center;padding:1rem;background:#FEF2F2;border:1px solid #EF4444;border-radius:8px">
+              <div style="font-size:1.25rem;font-weight:700;color:#DC2626">${fmt(aging.over60)}</div>
+              <div style="font-size:0.75rem;color:#991B1B">&gt; 60 days</div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Tabs -->
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border)">
+        <button class="detail-tab-btn active" data-tab="debts" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid var(--accent);margin-bottom:-2px;color:var(--accent)">
+          Vendor Debts (${debts.length})
+        </button>
+        <button class="detail-tab-btn" data-tab="payments" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
+          Payment History (${payments.length})
+        </button>
+        <button class="detail-tab-btn" data-tab="credit" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
+          Credit Purchases (${creditPurchases.length})
+        </button>
+      </div>
+
+      <!-- Tab Content -->
+      <div id="detail-tab-content" style="max-height:400px;overflow-y:auto">
+        ${renderDebtsTab(debts)}
+      </div>
+    `
+
+    // Tab switching
+    const tabBtns = modal.querySelectorAll('.detail-tab-btn')
+    const tabContent = modal.querySelector('#detail-tab-content')
+    
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabBtns.forEach(b => {
+          b.style.color = 'var(--muted)'
+          b.style.borderBottom = '2px solid transparent'
+        })
+        btn.style.color = 'var(--accent)'
+        btn.style.borderBottom = '2px solid var(--accent)'
+        
+        const tab = btn.dataset.tab
+        if (tab === 'debts') tabContent.innerHTML = renderDebtsTab(debts)
+        if (tab === 'payments') tabContent.innerHTML = renderPaymentsTab(payments)
+        if (tab === 'credit') tabContent.innerHTML = renderCreditPurchasesTab(creditPurchases)
+      })
+    })
+
+    // Pay supplier button
+    modal.querySelector('#pay-supplier-btn').addEventListener('click', () => {
+      openPaySupplierModal(vendorName, outstanding)
+    })
+
+    // Close modal
+    modal.querySelector('#detail-close').addEventListener('click', () => {
+      modal.style.display = 'none'
+    })
+    modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none' })
+  }
+
+  function calculateAgingBreakdown(debts) {
+    const now = new Date()
+    const breakdown = { under30: 0, thirtyTo60: 0, over60: 0, total: 0 }
+    
+    debts.forEach(debt => {
+      if (debt.status === 'paid') return
+      const remaining = Number(debt.amount_owed) - Number(debt.amount_paid)
+      const daysOld = Math.floor((now - new Date(debt.created_at)) / (1000 * 60 * 60 * 24))
+      
+      breakdown.total += remaining
+      if (daysOld < 30) breakdown.under30 += remaining
+      else if (daysOld < 60) breakdown.thirtyTo60 += remaining
+      else breakdown.over60 += remaining
+    })
+    
+    return breakdown
+  }
+
+  function renderDebtsTab(debts) {
+    if (!debts.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No vendor debts found</div>'
+
+    return debts.map(debt => {
+      const remaining = Number(debt.amount_owed) - Number(debt.amount_paid)
+      const status = remaining <= 0.01 ? 'paid' : Number(debt.amount_paid) > 0 ? 'partial' : 'unpaid'
+      const daysOld = Math.floor((new Date() - new Date(debt.created_at)) / (1000 * 60 * 60 * 24))
+      
+      return `
+        <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
+          <div style="padding:1rem;display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:600;color:var(--dark);margin-bottom:0.25rem">
+                ${new Date(debt.created_at).toLocaleDateString()}
+              </div>
+              <div style="font-size:0.875rem;color:var(--muted)">
+                ${daysOld} days ago • ${debt.notes || 'No notes'}
+              </div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-weight:700;font-size:1.0625rem;color:var(--danger)">${fmt(remaining)} ETB</div>
+              <div style="font-size:0.75rem;color:var(--muted)">Remaining</div>
+              <span class="badge ${status==='paid' ? 'badge-green' : status==='partial' ? 'badge-yellow' : 'badge-red'}" style="margin-top:0.25rem">
+                ${status}
+              </span>
+            </div>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  function renderPaymentsTab(payments) {
+    if (!payments.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No payments recorded</div>'
+
+    return payments.map(payment => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-weight:600">${new Date(payment.payment_date).toLocaleDateString()}</div>
+          <div style="font-size:0.8125rem;color:var(--muted)">${payment.payment_method}</div>
+          ${payment.notes ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${payment.notes}</div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">-${fmt(payment.payment_amount)} ETB</div>
+          <div style="font-size:0.75rem;color:var(--muted)">Payment</div>
+        </div>
+      </div>
+    `).join('')
+  }
+
+  function renderCreditPurchasesTab(creditPurchases) {
+    if (!creditPurchases.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No credit purchases found</div>'
+
+    return creditPurchases.map(purchase => `
+      <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
+        <div style="padding:1rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+            <div style="font-weight:600;color:var(--dark)">${new Date(purchase.created_at).toLocaleDateString()}</div>
+            <div style="font-weight:700;color:var(--accent)">${fmt(purchase.quantity * (purchase.unit_cost || 0))} ETB</div>
+          </div>
+          <div style="font-size:0.875rem;color:var(--muted)">
+            Qty: ${purchase.quantity} × ${fmt(purchase.unit_cost || 0)} ETB each
+          </div>
+          ${purchase.notes ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${purchase.notes}</div>` : ''}
+        </div>
+      </div>
+    `).join('')
+  }
+
+  // ── Pay Supplier Modal ─────────────────────────────────────
+  function openPaySupplierModal(vendorName, outstandingAmount) {
+    const overlay = document.createElement('div')
+    overlay.className = 'modal-overlay'
+    overlay.style.display = 'flex'
+
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Pay Supplier — ${vendorName}</div>
+          <button class="modal-close" id="pay-close">${renderIcon('close', 14)}</button>
+        </div>
+        
+        <div style="background:var(--bg-light);border-radius:var(--radius);padding:0.75rem;margin-bottom:1rem">
+          <div style="font-size:12px;color:var(--muted)">Outstanding Balance</div>
+          <div style="font-size:1.4rem;font-weight:700;color:var(--danger)">
+            ${fmt(outstandingAmount)} ETB
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Payment Amount (ETB) *</label>
+          <input type="number" class="form-input" id="pay-amount" max="${outstandingAmount}" placeholder="0.00">
+          <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+            <button class="btn btn-outline btn-sm" id="pay-full">Pay Full (${fmt(outstandingAmount)} ETB)</button>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Cash Account *</label>
+          <select class="form-input" id="pay-account">
+            <option value="">Select cash account</option>
+            ${cashAccounts.map(a => `<option value="${a.id}">${a.account_name} (${a.account_type === 'till' ? 'Till' : 'Bank'})</option>`).join('')}
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Payment Method</label>
+          <select class="form-input" id="pay-method">
+            <option value="cash">Cash</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="check">Check</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Notes</label>
+          <input class="form-input" id="pay-notes" placeholder="Optional notes">
+        </div>
+        
+        <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem">
+          <button class="btn btn-outline" id="pay-cancel">Cancel</button>
+          <button class="btn btn-primary" id="pay-confirm">✓ Process Payment</button>
+        </div>
+      </div>
+    `
+
+    document.body.appendChild(overlay)
+
+    // Event listeners
+    overlay.querySelector('#pay-full').addEventListener('click', () => {
+      overlay.querySelector('#pay-amount').value = outstandingAmount
+    })
+
+    const close = () => overlay.remove()
+    overlay.querySelector('#pay-close').addEventListener('click', close)
+    overlay.querySelector('#pay-cancel').addEventListener('click', close)
+
+    overlay.querySelector('#pay-confirm').addEventListener('click', async () => {
+      const amount = Number(overlay.querySelector('#pay-amount').value)
+      const account = overlay.querySelector('#pay-account').value
+      const method = overlay.querySelector('#pay-method').value
+      const notes = overlay.querySelector('#pay-notes').value.trim()
+
+      if (!amount || amount <= 0) { alert('Enter a valid amount'); return }
+      if (!account) { alert('Select a cash account'); return }
+      if (amount > outstandingAmount + 0.01) { alert(`Cannot exceed outstanding balance of ${fmt(outstandingAmount)} ETB`); return }
+
+      const confirmBtn = overlay.querySelector('#pay-confirm')
+      confirmBtn.disabled = true
+      confirmBtn.textContent = 'Processing...'
+
+      try {
+        // Find vendor ID
+        const vendor = allVendors.find(v => v.vendor_name === vendorName)
+        if (!vendor) throw new Error('Vendor not found')
+
+        // Record payment
+        await supabase.from('vendor_payments').insert({
+          vendor_id: vendor.id,
+          payment_amount: amount,
+          payment_method: method,
+          cash_account_id: account,
+          notes: notes || null
+        })
+
+        // Update vendor outstanding balance
+        const newBalance = Math.max(0, Number(vendor.outstanding_balance || 0) - amount)
+        await supabase.from('vendors').update({ outstanding_balance: newBalance }).eq('id', vendor.id)
+
+        // Update cash account balance (debit)
+        const { data: accountData } = await supabase.from('cash_accounts').select('balance').eq('id', account).single()
+        if (accountData) {
+          await supabase.from('cash_accounts').update({ balance: Number(accountData.balance) - amount }).eq('id', account)
+        }
+
+        // Update vendor debts (waterfall payment)
+        const vendorDebts = allVendorDebts.filter(d => d.vendor_name === vendorName && d.status !== 'paid').sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        let remainingToPay = amount
+
+        for (const debt of vendorDebts) {
+          if (remainingToPay <= 0.001) break
+          const canPay = Number(debt.amount_owed) - Number(debt.amount_paid)
+          if (canPay <= 0.001) continue
+          
+          const paying = Math.min(remainingToPay, canPay)
+          const newPaid = Number(debt.amount_paid) + paying
+          const newStatus = newPaid >= Number(debt.amount_owed) - 0.01 ? 'paid' : 'partial'
+          
+          await supabase.from('vendor_debts').update({ amount_paid: newPaid, status: newStatus }).eq('id', debt.id)
+          remainingToPay -= paying
+        }
+
+        close()
+        await loadVendors()
+        
+        // Show success message
+        const successDiv = document.createElement('div')
+        successDiv.style.cssText = 'position:fixed;top:20px;right:20px;background:var(--accent);color:white;padding:1rem;border-radius:8px;z-index:9999'
+        successDiv.textContent = `Payment of ${fmt(amount)} ETB processed successfully`
+        document.body.appendChild(successDiv)
+        setTimeout(() => successDiv.remove(), 3000)
+
+      } catch (error) {
+        console.error('Payment error:', error)
+        alert('Error processing payment: ' + error.message)
+        confirmBtn.disabled = false
+        confirmBtn.textContent = '✓ Process Payment'
+      }
     })
   }
 
@@ -284,10 +691,10 @@ export async function render(container) {
 
   async function deleteVendor(id) {
     const vendor = allVendors.find(v => v.id === id)
-    const purchases = allPurchases.filter(p => p.vendor_id === id)
+    const debts = allVendorDebts.filter(d => d.vendor_name === vendor.vendor_name)
     
-    if (purchases.length > 0) {
-      if (!confirm(`This supplier has ${purchases.length} purchase(s) recorded. Delete anyway?`)) return
+    if (debts.length > 0) {
+      if (!confirm(`This supplier has ${debts.length} debt(s) recorded. Delete anyway?`)) return
     } else {
       if (!confirm('Delete this supplier?')) return
     }
@@ -297,90 +704,17 @@ export async function render(container) {
     await loadVendors()
   }
 
-  // ── Purchase History Modal ─────────────────────────────────
-  async function openHistoryModal(vendorId, vendorName) {
-    container.querySelector('#history-title').textContent = `Purchase History — ${vendorName}`
-    container.querySelector('#history-modal').style.display = 'flex'
-    
-    const purchases = allPurchases.filter(p => p.vendor_id === vendorId)
-    const totalSpent = purchases.reduce((s, p) => s + Number(p.total_cost), 0)
-    const totalQty = purchases.reduce((s, p) => s + Number(p.quantity), 0)
-
-    if (purchases.length === 0) {
-      container.querySelector('#history-content').innerHTML = `
-        <div class="empty">
-          <div class="empty-icon">📋</div>
-          <div class="empty-text">No purchase history yet</div>
-        </div>
-      `
-      return
-    }
-
-    container.querySelector('#history-content').innerHTML = `
-      <!-- Summary -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem">
-        <div style="text-align:center;padding:1rem;background:var(--bg-subtle);border-radius:var(--radius)">
-          <div style="font-size:1.5rem;font-weight:800;color:var(--accent)">${purchases.length}</div>
-          <div style="font-size:0.8125rem;color:var(--muted)">Total Orders</div>
-        </div>
-        <div style="text-align:center;padding:1rem;background:var(--bg-subtle);border-radius:var(--radius)">
-          <div style="font-size:1.5rem;font-weight:800;color:var(--accent)">${fmt(totalQty)}</div>
-          <div style="font-size:0.8125rem;color:var(--muted)">Total Items</div>
-        </div>
-        <div style="text-align:center;padding:1rem;background:var(--bg-subtle);border-radius:var(--radius)">
-          <div style="font-size:1.5rem;font-weight:800;color:var(--accent)">${fmt(totalSpent)}</div>
-          <div style="font-size:0.8125rem;color:var(--muted)">Total Spent (ETB)</div>
-        </div>
-      </div>
-
-      <!-- Purchase List -->
-      <div style="font-weight:700;margin-bottom:0.75rem">Purchase History</div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Product</th>
-              <th>Quantity</th>
-              <th>Unit Cost</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${purchases.map(p => `
-              <tr>
-                <td>${formatDate(p.purchase_date)}</td>
-                <td><strong>${p.product_name}</strong></td>
-                <td>${fmt(p.quantity)}</td>
-                <td>${fmt(p.unit_cost)} ETB</td>
-                <td style="font-weight:600;color:var(--accent)">${fmt(p.total_cost)} ETB</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    `
-  }
-
-  function closeHistoryModal() {
-    container.querySelector('#history-modal').style.display = 'none'
-  }
-
   // ── Event Listeners ────────────────────────────────────────
   container.querySelector('#btn-add-vendor').addEventListener('click', openAddModal)
   container.querySelector('#modal-close').addEventListener('click', closeModal)
   container.querySelector('#modal-cancel').addEventListener('click', closeModal)
   container.querySelector('#modal-save').addEventListener('click', saveVendor)
-  container.querySelector('#history-close').addEventListener('click', closeHistoryModal)
   container.querySelector('#search').addEventListener('input', applyFilters)
   container.querySelector('#btn-refresh').addEventListener('click', loadVendors)
 
   // Close modals on overlay click
   container.querySelector('#vendor-modal').addEventListener('click', e => {
     if (e.target.id === 'vendor-modal') closeModal()
-  })
-  container.querySelector('#history-modal').addEventListener('click', e => {
-    if (e.target.id === 'history-modal') closeHistoryModal()
   })
 
   // ── Init ───────────────────────────────────────────────────

@@ -843,6 +843,26 @@ export async function render(container) {
           leftToApply -= applying
         }
 
+        // Record payment in payment_history table
+        await supabase.from('payment_history').insert({
+          customer_id: (await supabase.from('credit_sales').select('customer_id').eq('id', creditIds[0]).single()).data?.customer_id,
+          credit_sale_id: creditIds[0], // Primary credit sale this payment was applied to
+          payment_amount: amount,
+          payment_date: date,
+          payment_method: 'cash',
+          cash_account_id: account,
+          notes: notes || null
+        })
+
+        // Update customer credit_balance
+        const customerId = (await supabase.from('credit_sales').select('customer_id').eq('id', creditIds[0]).single()).data?.customer_id
+        if (customerId) {
+          await supabase.rpc('update_customer_credit', { 
+            customer_id: customerId, 
+            payment_amount: amount 
+          })
+        }
+
         // ── Transport fee recovery (proportional) ────────────────────
         try {
           const { data: pendingTfs } = await supabase.from('transport_fees')
@@ -925,11 +945,27 @@ export async function render(container) {
 
   // ── Customer history modal ──────────────────────────────
   async function openCustomerHistory(customerId, customerName) {
-    const [{ data: credits }, { data: custData }, { data: tfs }] = await Promise.all([
+    const [{ data: customer }, { data: credits }, { data: payments }, { data: tfs }] = await Promise.all([
+      supabase.from('customers').select('*').eq('id', customerId).single(),
       supabase.from('credit_sales')
-        .select('*, sales(sale_date, total_amount, payment_method)')
+        .select(`
+          *,
+          sales!inner(
+            sale_date, 
+            total_amount, 
+            payment_method,
+            sale_items(
+              item_name_snapshot,
+              quantity,
+              unit_price,
+              subtotal
+            )
+          )
+        `)
         .eq('customer_id', customerId).order('created_at', { ascending: false }),
-      supabase.from('customers').select('last_targa, default_place, phone, plate_number').eq('id', customerId).single(),
+      supabase.from('payment_history')
+        .select('*')
+        .eq('customer_id', customerId).order('payment_date', { ascending: false }),
       supabase.from('transport_fees').select('*').eq('charge_customer', true)
         .in('credit_sale_id', (await supabase.from('credit_sales').select('id').eq('customer_id', customerId)).data?.map(c => c.id) || []),
     ])
@@ -944,75 +980,258 @@ export async function render(container) {
     const totalTransport   = (tfs||[]).reduce((s,t) => s + Number(t.amount), 0)
     const recoveredTransport = (tfs||[]).reduce((s,t) => s + Number(t.recovered_amount), 0)
     const pendingTransport = totalTransport - recoveredTransport
+    const creditLimit     = Number(customer?.credit_limit || 0)
+    const currentBalance   = Number(customer?.credit_balance || 0)
+    const utilizationPct   = creditLimit > 0 ? Math.round((currentBalance / creditLimit) * 100) : 0
 
     histOverlay.innerHTML = `
-      <div class="modal" style="max-width:580px">
+      <div class="modal" style="max-width:680px">
         <div class="modal-header">
-          <div class="modal-title">📒 ${customerName || 'Customer'} — Credit History</div>
+          <div class="modal-title">📒 ${customerName || 'Customer'} — Credit Account</div>
           <button class="modal-close" id="hist-close">✕</button>
         </div>
 
-        ${(custData?.last_targa || custData?.default_place) ? `
-          <div style="display:flex;gap:1rem;flex-wrap:wrap;padding:0.625rem 0.875rem;background:var(--bg-subtle);border-radius:10px;margin-bottom:1rem;font-size:0.8125rem">
-            ${custData.last_targa ? `<span>🚗 <b style="font-family:monospace">${custData.last_targa}</b></span>` : ''}
-            ${custData.default_place ? `<span>📍 ${custData.default_place}</span>` : ''}
+        <!-- Customer Header -->
+        <div style="background:var(--bg-subtle);border-radius:12px;padding:1.25rem;margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem">
+            <div>
+              <h3 style="margin:0 0 0.5rem 0;color:var(--dark)">${customerName || 'Customer'}</h3>
+              ${customer?.phone ? `<div style="color:var(--muted);font-size:0.875rem">📞 ${customer.phone}</div>` : ''}
+              ${(customer?.last_targa || customer?.default_place) ? `
+                <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:0.5rem;font-size:0.8125rem">
+                  ${customer.last_targa ? `<span>🚗 <b style="font-family:monospace">${customer.last_targa}</b></span>` : ''}
+                  ${customer.default_place ? `<span>📍 ${customer.default_place}</span>` : ''}
+                </div>
+              ` : ''}
+            </div>
+            <button class="btn btn-primary btn-sm" id="record-payment-btn" data-customer-id="${customerId}" data-customer-name="${customerName}">
+              + Record Payment
+            </button>
           </div>
-        ` : ''}
-
-        <div style="display:grid;grid-template-columns:repeat(${pendingTransport > 0 ? 4 : 3},1fr);gap:0.625rem;margin-bottom:1rem">
-          <div style="text-align:center;padding:0.625rem;background:var(--bg-light);border-radius:var(--radius)">
-            <div style="font-size:11px;color:var(--muted)">TOTAL SALES</div>
-            <div style="font-weight:700;font-size:1rem">${fmt(totalOwed)}</div>
-          </div>
-          <div style="text-align:center;padding:0.625rem;background:var(--bg-light);border-radius:var(--radius)">
-            <div style="font-size:11px;color:var(--muted)">PAID</div>
-            <div style="font-weight:700;font-size:1rem;color:var(--accent)">${fmt(totalPaid)}</div>
-          </div>
-          <div style="text-align:center;padding:0.625rem;background:var(--bg-light);border-radius:var(--radius)">
-            <div style="font-size:11px;color:var(--muted)">OUTSTANDING</div>
-            <div style="font-weight:700;font-size:1rem;color:${outstanding > 0 ? 'var(--warning)' : 'var(--accent)'}">
-              ${outstanding > 0 ? fmt(outstanding) : '✓ Clear'}
+          
+          <!-- Credit Stats -->
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem">
+            <div>
+              <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Current Balance</div>
+              <div style="font-size:1.5rem;font-weight:700;color:var(--warning)">${fmt(currentBalance)} ETB</div>
+            </div>
+            <div>
+              <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Credit Limit</div>
+              <div style="font-size:1.5rem;font-weight:700;color:var(--dark)">${fmt(creditLimit)} ETB</div>
             </div>
           </div>
-          ${pendingTransport > 0 ? `
-            <div style="text-align:center;padding:0.625rem;background:#FFFBEB;border:1px solid #FCD34D;border-radius:var(--radius)">
-              <div style="font-size:11px;color:#92400E">🚚 TRANSPORT</div>
-              <div style="font-weight:700;font-size:1rem;color:#92400E">${fmt(pendingTransport)}</div>
+          
+          <!-- Progress Bar -->
+          ${creditLimit > 0 ? `
+            <div style="margin-top:1rem">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                <span style="font-size:0.75rem;color:var(--muted)">Credit Utilization</span>
+                <span style="font-size:0.75rem;font-weight:600;color:${utilizationPct > 80 ? 'var(--danger)' : utilizationPct > 60 ? 'var(--warning)' : 'var(--accent)'}">${utilizationPct}%</span>
+              </div>
+              <div style="height:8px;background:var(--border);border-radius:999px;overflow:hidden">
+                <div style="height:100%;width:${utilizationPct}%;background:${utilizationPct > 80 ? 'var(--danger)' : utilizationPct > 60 ? 'var(--warning)' : 'var(--accent)'};transition:width 0.3s"></div>
+              </div>
             </div>
           ` : ''}
         </div>
 
-        <div style="max-height:340px;overflow-y:auto">
-          ${(credits||[]).map(c => {
-            const remaining = Number(c.amount_owed) - Number(c.amount_paid)
-            const tf = (tfs||[]).find(t => t.credit_sale_id === c.id)
-            const tfPending = tf ? Number(tf.amount) - Number(tf.recovered_amount) : 0
-            return `
-              <div style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                  <div>
-                    <div style="font-weight:500;font-size:13.5px">${c.sales?.sale_date || '—'}</div>
-                    <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
-                      Sale: ${fmt(c.amount_owed)} ETB · Paid: ${fmt(c.amount_paid)} ETB
-                    </div>
-                    ${tf ? `<div style="font-size:11.5px;color:#92400E;margin-top:2px">🚚 Transport: ${fmt(tf.amount)} ETB${tfPending > 0 ? ' — <b>'+fmt(tfPending)+' pending recovery</b>' : ' — ✓ recovered'}</div>` : ''}
-                  </div>
-                  <div style="text-align:right">
-                    <span class="badge ${c.status==='paid'?'badge-green':c.status==='partial'?'badge-yellow':'badge-red'}">
-                      ${c.status}
-                    </span>
-                    ${remaining > 0 ? `<div style="font-size:11.5px;color:var(--warning);margin-top:2px">${fmt(remaining)} ETB left</div>` : ''}
-                  </div>
-                </div>
-              </div>
-            `
-          }).join('') || '<div class="empty"><div class="empty-text">No credit history</div></div>'}
+        <!-- Tabs -->
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border)">
+          <button class="history-tab-btn active" data-tab="sales" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid var(--accent);margin-bottom:-2px;color:var(--accent)">
+            Credit Sales (${credits?.length || 0})
+          </button>
+          <button class="history-tab-btn" data-tab="payments" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
+            Payment History (${payments?.length || 0})
+          </button>
+          ${pendingTransport > 0 ? `
+            <button class="history-tab-btn" data-tab="transport" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
+              Transport Fees
+            </button>
+          ` : ''}
+        </div>
+
+        <!-- Tab Content -->
+        <div id="history-tab-content" style="max-height:400px;overflow-y:auto">
+          ${renderCreditSalesTab(credits || [], tfs || [])}
         </div>
       </div>
     `
 
     document.body.appendChild(histOverlay)
+
+    // Tab switching
+    const tabBtns = histOverlay.querySelectorAll('.history-tab-btn')
+    const tabContent = histOverlay.querySelector('#history-tab-content')
+    
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabBtns.forEach(b => {
+          b.style.color = 'var(--muted)'
+          b.style.borderBottom = '2px solid transparent'
+        })
+        btn.style.color = 'var(--accent)'
+        btn.style.borderBottom = '2px solid var(--accent)'
+        
+        const tab = btn.dataset.tab
+        if (tab === 'sales') tabContent.innerHTML = renderCreditSalesTab(credits || [], tfs || [])
+        if (tab === 'payments') tabContent.innerHTML = renderPaymentsTab(payments || [])
+        if (tab === 'transport') tabContent.innerHTML = renderTransportTab(tfs || [])
+      })
+    })
+
+    // Close modal
     histOverlay.querySelector('#hist-close').addEventListener('click', () => histOverlay.remove())
+    histOverlay.addEventListener('click', e => { if (e.target === histOverlay) histOverlay.remove() })
+
+    // Record payment button
+    histOverlay.querySelector('#record-payment-btn').addEventListener('click', () => {
+      openPaymentModal({
+        type: 'credit',
+        ids: (credits || []).filter(c => c.status !== 'paid').sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(c => c.id),
+        name: customerName,
+        remaining: outstanding,
+        onDone: () => {
+          histOverlay.remove()
+          loadTab()
+        }
+      })
+    })
+  }
+
+  function renderCreditSalesTab(credits, transportFees) {
+    if (!credits.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No credit sales found</div>'
+
+    return credits.map(credit => {
+      const remaining = Number(credit.amount_owed) - Number(credit.amount_paid)
+      const status = remaining <= 0.01 ? 'paid' : Number(credit.amount_paid) > 0 ? 'partial' : 'unpaid'
+      const transportFee = transportFees.find(tf => tf.credit_sale_id === credit.id)
+      const items = credit.sales?.sale_items || []
+      
+      return `
+        <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
+          <!-- Header -->
+          <div style="padding:1rem;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'">
+            <div>
+              <div style="font-weight:600;color:var(--dark);margin-bottom:0.25rem">
+                ${credit.sales?.sale_date || new Date(credit.created_at).toLocaleDateString()}
+              </div>
+              <div style="font-size:0.875rem;color:var(--muted)">
+                ${items.length} item${items.length !== 1 ? 's' : ''} • ${credit.sales?.payment_method || 'credit'}
+              </div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-weight:700;font-size:1.0625rem;color:var(--accent)">${fmt(credit.amount_owed)} ETB</div>
+              <div style="font-size:0.75rem;color:var(--muted)">Total Sale</div>
+              <span class="badge ${status==='paid' ? 'badge-green' : status==='partial' ? 'badge-yellow' : 'badge-grey'}" style="margin-top:0.25rem">
+                ${status}
+              </span>
+            </div>
+          </div>
+          
+          <!-- Expandable Details -->
+          <div style="display:none;border-top:1px solid var(--border)">
+            <div style="padding:1rem">
+              <!-- Payment Status -->
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem">
+                <div style="text-align:center;padding:0.75rem;background:var(--bg-subtle);border-radius:8px">
+                  <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem">Total Sale</div>
+                  <div style="font-weight:600">${fmt(credit.amount_owed)} ETB</div>
+                </div>
+                <div style="text-align:center;padding:0.75rem;background:var(--bg-subtle);border-radius:8px">
+                  <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem">Paid</div>
+                  <div style="font-weight:600;color:var(--accent)">${fmt(credit.amount_paid)} ETB</div>
+                </div>
+                <div style="text-align:center;padding:0.75rem;background:var(--bg-subtle);border-radius:8px">
+                  <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem">Remaining</div>
+                  <div style="font-weight:600;color:${remaining > 0 ? 'var(--warning)' : 'var(--accent)'}">
+                    ${remaining > 0 ? fmt(remaining) + ' ETB' : '✓ Paid'}
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Line Items -->
+              ${items.length > 0 ? `
+                <div style="margin-bottom:1rem">
+                  <div style="font-weight:600;margin-bottom:0.5rem;color:var(--dark)">Line Items</div>
+                  ${items.map(item => `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+                      <div>
+                        <div style="font-weight:500">${item.item_name_snapshot || 'Unknown Item'}</div>
+                        <div style="font-size:0.8125rem;color:var(--muted)">Qty: ${item.quantity} × ${fmt(item.unit_price)} ETB</div>
+                      </div>
+                      <div style="font-weight:600">${fmt(item.subtotal || (item.unit_price * item.quantity))} ETB</div>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+              
+              <!-- Transport Fee -->
+              ${transportFee ? `
+                <div style="background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;padding:0.75rem">
+                  <div style="font-weight:600;color:#92400E;margin-bottom:0.25rem">🚚 Transport Fee</div>
+                  <div style="display:flex;justify-content:space-between">
+                    <span>Fee: ${fmt(transportFee.amount)} ETB</span>
+                    <span>Recovered: ${fmt(transportFee.recovered_amount || 0)} ETB</span>
+                  </div>
+                </div>
+              ` : ''}
+              
+              <!-- Notes -->
+              ${credit.notes ? `
+                <div style="margin-top:0.75rem">
+                  <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem">Notes</div>
+                  <div style="font-style:italic;color:var(--dark)">${credit.notes}</div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  function renderPaymentsTab(payments) {
+    if (!payments.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No payments recorded</div>'
+
+    let runningBalance = 0
+    return payments.map(payment => {
+      runningBalance += Number(payment.payment_amount)
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-weight:600">${new Date(payment.payment_date).toLocaleDateString()}</div>
+            <div style="font-size:0.8125rem;color:var(--muted)">${payment.payment_method}</div>
+            ${payment.notes ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${payment.notes}</div>` : ''}
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">+${fmt(payment.payment_amount)} ETB</div>
+            <div style="font-size:0.75rem;color:var(--muted)">Balance: ${fmt(runningBalance)} ETB</div>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  function renderTransportTab(transportFees) {
+    if (!transportFees.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No transport fees</div>'
+
+    return transportFees.map(tf => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-weight:600">${fmt(tf.amount)} ETB</div>
+          <div style="font-size:0.8125rem;color:var(--muted)">${tf.worker_name || 'Unknown'}</div>
+          ${tf.note ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${tf.note}</div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:600;color:${tf.fully_recovered ? 'var(--accent)' : 'var(--warning)'}">
+            ${tf.fully_recovered ? '✓ Recovered' : fmt(tf.amount - (tf.recovered_amount || 0)) + ' ETB'}
+          </div>
+          <div style="font-size:0.75rem;color:var(--muted)">
+            ${fmt(tf.recovered_amount || 0)} / ${fmt(tf.amount)}
+          </div>
+        </div>
+      </div>
+    `).join('')
   }
 
   // Init
