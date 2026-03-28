@@ -20,6 +20,7 @@ let allItems    = []
 let searchQuery = ''
 let customers   = []
 let accounts    = []
+let posTransport = { fee: 0, targa: '', place: '', paidNow: true }
 
 export async function render(container) {
   const { currentStore, accountingView, stores } = appStore.getState()
