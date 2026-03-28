@@ -16,6 +16,40 @@ export async function render(container) {
       <button class="btn btn-primary btn-sm" id="btn-add">+ Add Item</button>
     </div>
 
+    <!-- Inventory Summary -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:1rem">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Inventory Value</div>
+        <div class="kpi-value" id="sum-total-value">0.00</div>
+        <div class="kpi-sub">ETB</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Items</div>
+        <div class="kpi-value" id="sum-total-items">0</div>
+        <div class="kpi-sub">unique products</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Units</div>
+        <div class="kpi-value" id="sum-total-units">0</div>
+        <div class="kpi-sub">in stock</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Potential Revenue</div>
+        <div class="kpi-value" id="sum-potential-revenue">0.00</div>
+        <div class="kpi-sub">ETB (at selling price)</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Low Stock Items</div>
+        <div class="kpi-value" id="sum-low-stock" style="color:var(--warning)">0</div>
+        <div class="kpi-sub">need reorder</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Out of Stock</div>
+        <div class="kpi-value" id="sum-out-stock" style="color:var(--danger)">0</div>
+        <div class="kpi-sub">items</div>
+      </div>
+    </div>
+
     <div class="card" style="margin-bottom:1rem">
       <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
         <input class="form-input" id="search" placeholder="Search items..." style="max-width:260px">
@@ -214,7 +248,56 @@ export async function render(container) {
         cats.map(c => `<option value="${c}">${c}</option>`).join('')
     }
 
+    updateSummary()
     renderTable(allItems)
+  }
+
+  function updateSummary() {
+    // Calculate total inventory value (quantity × unit_cost)
+    const totalValue = allItems.reduce((sum, item) => {
+      const qty = Number(item.quantity) || 0
+      const cost = Number(item.unit_cost) || 0
+      return sum + (qty * cost)
+    }, 0)
+
+    // Calculate potential revenue (quantity × selling_price)
+    const potentialRevenue = allItems.reduce((sum, item) => {
+      const qty = Number(item.quantity) || 0
+      const price = Number(item.selling_price) || 0
+      return sum + (qty * price)
+    }, 0)
+
+    // Total unique items
+    const totalItems = allItems.length
+
+    // Total units in stock
+    const totalUnits = allItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+
+    // Count stock status
+    let lowStockCount = 0
+    let outOfStockCount = 0
+    allItems.forEach(item => {
+      const qty = Number(item.quantity) || 0
+      const threshold = Number(item.low_stock_threshold) || 5
+      if (qty === 0) {
+        outOfStockCount++
+      } else if (qty <= threshold) {
+        lowStockCount++
+      }
+    })
+
+    // Update UI
+    const setValue = (id, value) => {
+      const el = container.querySelector(`#${id}`)
+      if (el) el.textContent = value
+    }
+
+    setValue('sum-total-value', fmt(totalValue))
+    setValue('sum-total-items', totalItems)
+    setValue('sum-total-units', totalUnits)
+    setValue('sum-potential-revenue', fmt(potentialRevenue))
+    setValue('sum-low-stock', lowStockCount)
+    setValue('sum-out-stock', outOfStockCount)
   }
 
   function renderTable(items) {
@@ -590,10 +673,7 @@ export async function render(container) {
             payable_settled: invTransportPaidNow,
             worker_name:     targa,
           })
-          if (invTransportPaidNow && paidAccountId) {
-            const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', paidAccountId).single()
-            if (acc) await supabase.from('cash_accounts').update({ balance: Number(acc.balance) - transportFee }).eq('id', paidAccountId)
-          } else if (!invTransportPaidNow) {
+          if (!invTransportPaidNow) {
             await supabase.from('vendor_debts').insert({
               store_id:    currentStore?.id,
               vendor_name: 'Driver' + (targa ? ` (${targa})` : ''),
