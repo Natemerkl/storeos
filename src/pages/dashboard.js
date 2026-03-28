@@ -24,12 +24,14 @@ export async function render(container) {
   if (isStale()) return  // user navigated away
 
   fillDashboard(container, data, isStale)
+  fillTransportWidget(container).catch(e => console.warn('Transport widget:', e.message))
 
   container.querySelector('#btn-refresh')?.addEventListener('click', async () => {
     if (isStale()) return
     const fresh = await getDashboardData(true)
     if (isStale()) return
     fillDashboard(container, fresh, isStale)
+    fillTransportWidget(container).catch(e => console.warn('Transport widget:', e.message))
   })
 
   // Listen for date range changes
@@ -38,6 +40,7 @@ export async function render(container) {
     const fresh = await getDashboardData(true)
     if (isStale()) return
     fillDashboard(container, fresh, isStale)
+    fillTransportWidget(container).catch(e => console.warn('Transport widget:', e.message))
   }
   window.addEventListener('dateRangeChanged', handleDateRangeChange)
   
@@ -126,6 +129,7 @@ function buildSkeleton(currentStore, accountingView) {
         <div style="font-weight:600;margin-bottom:0.75rem;font-size:0.9375rem">Date Range</div>
         <div id="date-range-container"></div>
       </div>
+      <div id="transport-widget"></div>
       <div class="card" style="margin-top:1rem">
         <div style="font-weight:600;margin-bottom:1rem">Recent Activity</div>
         <div id="activity-list">
@@ -183,6 +187,7 @@ function buildSkeleton(currentStore, accountingView) {
       <div style="font-weight:600;margin-bottom:0.75rem;font-size:0.9375rem">Date Range</div>
       <div id="date-range-container"></div>
     </div>
+    <div id="transport-widget"></div>
     <div class="card" style="margin-top:1rem">
       <div style="font-weight:600;margin-bottom:1rem">Recent Activity</div>
       <div id="activity-list">
@@ -412,6 +417,74 @@ function fillDashboard(container, data, isStale) {
       fillDashboard(container, fresh, isStale)
     })
   }
+}
+
+async function fillTransportWidget(container) {
+  const el = container.querySelector('#transport-widget')
+  if (!el) return
+
+  const { currentStore, stores, accountingView } = appStore.getState()
+  const storeIds = accountingView === 'joint' ? stores.map(s => s.id) : [currentStore?.id]
+
+  const [{ data: payableTfs }, { data: receivableTfs }] = await Promise.all([
+    supabase.from('transport_fees')
+      .select('id, amount, worker_name, entity_type, created_at')
+      .in('store_id', storeIds).eq('paid_now', false).eq('payable_settled', false),
+    supabase.from('transport_fees')
+      .select('id, amount, recovered_amount, worker_name, entity_type, created_at, customers(name)')
+      .in('store_id', storeIds).eq('charge_customer', true).eq('fully_recovered', false),
+  ])
+
+  const totalPayable    = (payableTfs||[]).reduce((s,t) => s + Number(t.amount), 0)
+  const totalReceivable = (receivableTfs||[]).reduce((s,t) => s + Number(t.amount) - Number(t.recovered_amount), 0)
+
+  if (totalPayable === 0 && totalReceivable === 0) { el.innerHTML = ''; return }
+
+  const rows = [
+    ...(payableTfs||[]).slice(0,3).map(t => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div>
+          <span style="color:#92400E;font-weight:600">Owe driver${t.worker_name ? ' — ' + t.worker_name : ''}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:0.5rem">${new Date(t.created_at).toLocaleDateString()}</span>
+        </div>
+        <div style="font-weight:700;color:#92400E">${fmt(t.amount)} ETB</div>
+      </div>
+    `),
+    ...(receivableTfs||[]).slice(0,3).map(t => {
+      const pending = Number(t.amount) - Number(t.recovered_amount)
+      return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div>
+          <span style="color:#065F46;font-weight:600">${t.customers?.name || 'Customer'}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:0.5rem">${new Date(t.created_at).toLocaleDateString()}</span>
+        </div>
+        <div style="font-weight:700;color:#065F46">${fmt(pending)} ETB</div>
+      </div>
+    `}),
+  ].join('')
+
+  el.innerHTML = `
+    <div class="card" style="margin-top:1rem">
+      <div style="font-weight:700;margin-bottom:0.875rem;font-size:0.9375rem">🚚 Transport Advances</div>
+      <div style="display:grid;grid-template-columns:${totalPayable > 0 && totalReceivable > 0 ? '1fr 1fr' : '1fr'};gap:0.75rem;margin-bottom:${rows ? '0.875rem' : '0'}">
+        ${totalPayable > 0 ? `
+          <div style="padding:0.75rem;background:#FEF3C7;border:1px solid #FCD34D;border-radius:10px">
+            <div style="font-size:0.6875rem;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.3rem">You Owe (Drivers)</div>
+            <div style="font-size:1.25rem;font-weight:800;color:#92400E">${fmt(totalPayable)} ETB</div>
+            <div style="font-size:0.75rem;color:var(--muted)">${(payableTfs||[]).length} pending</div>
+          </div>
+        ` : ''}
+        ${totalReceivable > 0 ? `
+          <div style="padding:0.75rem;background:#ECFDF5;border:1px solid #6EE7B7;border-radius:10px">
+            <div style="font-size:0.6875rem;font-weight:700;color:#065F46;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.3rem">Customers Owe You</div>
+            <div style="font-size:1.25rem;font-weight:800;color:#065F46">${fmt(totalReceivable)} ETB</div>
+            <div style="font-size:0.75rem;color:var(--muted)">${(receivableTfs||[]).length} pending</div>
+          </div>
+        ` : ''}
+      </div>
+      ${rows}
+    </div>
+  `
 }
 
 function setupBalanceToggles(container, accounts, totalCash) {

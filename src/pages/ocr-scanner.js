@@ -1,8 +1,9 @@
-import { supabase } from '../supabase.js'
+﻿import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
 import { navigate } from '../router.js'
 import { renderIcon } from '../components/icons.js'
 import { openSmartOCRModal } from '../components/smart-ocr-modal.js'
+import { openColumnCorrectionModal } from '../components/column-correction-modal.js'
 import { consumePendingScan } from '../components/mobile-nav.js'
 
 export async function render(container) {
@@ -42,7 +43,7 @@ export async function render(container) {
           Drop a file here or click to upload
         </div>
         <div style="color:var(--muted);font-size:0.8125rem">
-          Supports JPG, PNG, PDF — max 10MB
+          Supports JPG, PNG, PDF  max 10MB
         </div>
         <input type="file" id="file-input" accept="image/*,.pdf" style="display:none">
       </div>
@@ -131,32 +132,26 @@ export async function render(container) {
 
   let selectedFile  = null
   let cameraStream  = null
-  let isScanning    = false  // prevents double-scan / stuck state
+  let isScanning    = false
 
-  // ── Consume pending scan from FAB camera ───────────────
-  // Must run after render so DOM exists
   setTimeout(() => {
     const pending = consumePendingScan()
     if (pending) handleFile(pending)
   }, 100)
 
-  // ── Drop zone ──────────────────────────────────────────
   const dropZone  = container.querySelector('#drop-zone')
   const fileInput = container.querySelector('#file-input')
 
   dropZone.addEventListener('click', () => fileInput.click())
-
   dropZone.addEventListener('dragover', e => {
     e.preventDefault()
     dropZone.style.borderColor = 'var(--accent)'
     dropZone.style.background  = 'var(--teal-50)'
   })
-
   dropZone.addEventListener('dragleave', () => {
     dropZone.style.borderColor = 'var(--border)'
     dropZone.style.background  = 'var(--bg-subtle)'
   })
-
   dropZone.addEventListener('drop', e => {
     e.preventDefault()
     dropZone.style.borderColor = 'var(--border)'
@@ -164,23 +159,19 @@ export async function render(container) {
     const file = e.dataTransfer.files[0]
     if (file) handleFile(file)
   })
-
   fileInput.addEventListener('change', e => {
     if (e.target.files[0]) handleFile(e.target.files[0])
   })
 
-  // ── Camera ─────────────────────────────────────────────
   container.querySelector('#btn-camera').addEventListener('click', async () => {
     try {
-      cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      })
+      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       container.querySelector('#camera-preview').srcObject = cameraStream
       container.querySelector('#camera-section').style.display = 'block'
       container.querySelector('#btn-camera').style.display     = 'none'
       dropZone.style.display = 'none'
     } catch(err) {
-      showToast('Camera not available — please upload a file instead', 'error')
+      showToast('Camera not available  please upload a file instead', 'error')
     }
   })
 
@@ -200,23 +191,15 @@ export async function render(container) {
   })
 
   function stopCamera() {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(t => t.stop())
-      cameraStream = null
-    }
+    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null }
     container.querySelector('#camera-section').style.display = 'none'
     container.querySelector('#btn-camera').style.display     = ''
     dropZone.style.display = 'block'
   }
 
-  // ── File handler ───────────────────────────────────────
   function handleFile(file) {
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('File too large — max 10MB', 'error')
-      return
-    }
+    if (file.size > 10 * 1024 * 1024) { showToast('File too large  max 10MB', 'error'); return }
     selectedFile = file
-
     const reader = new FileReader()
     reader.onload = e => {
       container.querySelector('#preview-img').src = e.target.result
@@ -235,7 +218,6 @@ export async function render(container) {
     fileInput.value = ''
   })
 
-  // ── Scan ───────────────────────────────────────────────
   container.querySelector('#btn-scan').addEventListener('click', async () => {
     if (!selectedFile || isScanning) return
     isScanning = true
@@ -245,59 +227,51 @@ export async function render(container) {
 
   async function doScan() {
     showProgress('Uploading receipt...')
-
     try {
-      // 1. Compress image
       const compressed = await compressImage(selectedFile)
 
-      // 2. Upload to Supabase Storage
       const ext      = selectedFile.name.split('.').pop() || 'jpg'
       const fileName = `${currentStore?.id || 'scan'}/${Date.now()}.${ext}`
-
       const { error: uploadError } = await supabase.storage
-        .from('receipts')
-        .upload(fileName, compressed, { contentType: selectedFile.type })
-
+        .from('receipts').upload(fileName, compressed, { contentType: selectedFile.type })
       if (uploadError) throw uploadError
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('receipts').getPublicUrl(fileName)
+      const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(fileName)
 
       showProgress('AI is reading your document...')
 
-      // 3. Call OCR Edge Function
       const { data: ocrResult, error: ocrError } = await supabase.functions.invoke('ocr-proxy', {
-        body: {
-          imageUrl: publicUrl,
-          storeId:  currentStore?.id || 'onboarding',
-        }
+        body: { imageUrl: publicUrl, storeId: currentStore?.id || 'onboarding' }
       })
-
       if (ocrError) throw new Error(ocrError.message || 'OCR failed')
       if (ocrResult?.error) throw new Error(ocrResult.error)
 
       const processFinalFlow = async (finalParsedData, finalLogId) => {
         showProgress('Preparing Smart Review...')
-        
         if (!finalLogId && currentStore?.id) {
-          const { data: logData, error: logError } = await supabase
-            .from('ocr_logs')
-            .insert({
-              store_id:    currentStore?.id,
-              image_url:   publicUrl,
-              raw_text:    ocrResult.raw_text || '',
-              parsed_data: finalParsedData,
-              status:      'pending',
-            }).select('id').single()
+          const { data: logData, error: logError } = await supabase.from('ocr_logs').insert({
+            store_id:    currentStore?.id,
+            image_url:   publicUrl,
+            raw_text:    ocrResult.raw_text || '',
+            parsed_data: {
+              ...finalParsedData,
+              customer_header: ocrResult.customer_header || null,
+              transport:       ocrResult.transport       || null,
+              payment_bank:    ocrResult.payment_bank    || null,
+              validation:      ocrResult.validation      || null,
+            },
+            status: 'pending',
+          }).select('id').single()
           if (logError) throw logError
           finalLogId = logData?.id
         }
-
         if (!finalLogId) throw new Error('Could not create scan record')
 
         hideProgress()
         selectedFile = null
-        container.querySelector('#preview-section').style.display = 'none'
+        isScanning   = false
+        container.querySelector('#preview-section').style.display  = 'none'
+        container.querySelector('#progress-section').style.display = 'none'
         dropZone.style.display = 'block'
         fileInput.value = ''
 
@@ -306,41 +280,40 @@ export async function render(container) {
       }
 
       const parsedData = ocrResult?.parsed_data || { line_items: [] }
-      let logId = ocrResult?.id
+      let logId = null
 
-      if (parsedData.column_detection?.needs_review) {
-        hideProgress()
-        const { openColumnCorrectionModal } = await import('../components/column-correction-modal.js')
+      if (ocrResult.raw_text) {
         openColumnCorrectionModal({
-          imageUrl: publicUrl,
-          columns: parsedData.column_detection.columns,
-          rawText: ocrResult.raw_text,
-          onSave: async (orderedTypes) => {
+          imageUrl:       publicUrl,
+          columns:        parsedData.column_detection?.columns || [],
+          rawText:        ocrResult.raw_text,
+          customerHeader: ocrResult.customer_header || {},
+          transport:      ocrResult.transport || null,
+          onSave: async (orderedTypes, confirmedHeader) => {
             showProgress('Re-processing with corrected columns...')
             try {
               const { data: finalResult, error: finalError } = await supabase.functions.invoke('ocr-proxy', {
                 body: {
-                  imageUrl: publicUrl,
-                  storeId: currentStore?.id || 'onboarding',
+                  imageUrl:            publicUrl,
+                  storeId:             currentStore?.id || 'onboarding',
                   manual_column_order: orderedTypes
                 }
               })
               if (finalError) throw new Error(finalError.message)
               if (finalResult?.error) throw new Error(finalResult.error)
-              
-              const finalLogId = finalResult?.id || logId
-              await processFinalFlow(finalResult.parsed_data, finalLogId)
+              if (confirmedHeader) finalResult.customer_header = confirmedHeader
+              await processFinalFlow(finalResult.parsed_data || parsedData, logId)
             } catch (err) {
               console.error(err)
               showToast('Correction failed: ' + err.message, 'error')
             }
           },
           onRescan: () => {
-             selectedFile = null
-             isScanning = false
-             container.querySelector('#preview-section').style.display = 'none'
-             dropZone.style.display = 'block'
-             fileInput.value = ''
+            selectedFile = null
+            isScanning   = false
+            container.querySelector('#preview-section').style.display = 'none'
+            dropZone.style.display = 'block'
+            fileInput.value = ''
           }
         })
       } else {
@@ -350,27 +323,17 @@ export async function render(container) {
     } catch(err) {
       console.error('Scan error:', err)
       hideProgress()
-
-      // Show error — don't leave user stuck
       showToast(`Scan failed: ${err.message}`, 'error')
-
-      // Offer manual entry as fallback
       if (currentStore?.id) {
-        const useManual = confirm(
-          'AI scan failed. Would you like to open manual entry mode instead?'
-        )
+        const useManual = confirm('AI scan failed. Would you like to open manual entry mode instead?')
         if (useManual) {
-          const { data: logData } = await supabase
-            .from('ocr_logs')
-            .insert({
-              store_id:    currentStore?.id,
-              image_url:   '',
-              raw_text:    '',
-              parsed_data: { line_items: [] },
-              status:      'pending',
-            })
-            .select('id').single()
-
+          const { data: logData } = await supabase.from('ocr_logs').insert({
+            store_id:    currentStore?.id,
+            image_url:   '',
+            raw_text:    '',
+            parsed_data: { line_items: [] },
+            status:      'pending',
+          }).select('id').single()
           if (logData?.id) {
             selectedFile = null
             container.querySelector('#preview-section').style.display = 'none'
@@ -394,7 +357,6 @@ export async function render(container) {
     container.querySelector('#progress-section').style.display = 'none'
   }
 
-  // ── Image compression ──────────────────────────────────
   async function compressImage(file) {
     if (file.type === 'application/pdf') return file
     return new Promise(resolve => {
@@ -421,23 +383,16 @@ export async function render(container) {
     })
   }
 
-  // ── Recent scans ───────────────────────────────────────
   async function loadRecentScans() {
     if (!currentStore?.id) {
       container.querySelector('#recent-scans').innerHTML = `
-        <div class="empty">
-          <div class="empty-text">Select a store to view scans</div>
-        </div>
+        <div class="empty"><div class="empty-text">Select a store to view scans</div></div>
       `
       return
     }
-
     const { data, error } = await supabase
-      .from('ocr_logs')
-      .select('*')
-      .eq('store_id', currentStore?.id)
-      .order('created_at', { ascending: false })
-      .limit(15)
+      .from('ocr_logs').select('*').eq('store_id', currentStore?.id)
+      .order('created_at', { ascending: false }).limit(15)
 
     const el = container.querySelector('#recent-scans')
     if (!el) return
@@ -457,12 +412,7 @@ export async function render(container) {
       <div class="table-wrap">
         <table>
           <thead>
-            <tr>
-              <th>Date</th>
-              <th>Status</th>
-              <th>Items</th>
-              <th>Actions</th>
-            </tr>
+            <tr><th>Date</th><th>Status</th><th>Items</th><th>Actions</th></tr>
           </thead>
           <tbody>
             ${data.map(log => {
@@ -484,29 +434,20 @@ export async function render(container) {
                     ${itemCount > 0
                       ? `<span style="font-weight:600">${itemCount}</span>
                          <span style="color:var(--muted);font-size:0.8125rem"> items</span>`
-                      : '<span style="color:var(--muted)">—</span>'
+                      : '<span style="color:var(--muted)"></span>'
                     }
                   </td>
                   <td data-label="Actions">
                     <div style="display:flex;gap:0.375rem;flex-wrap:wrap">
                       ${log.status !== 'applied' && log.status !== 'discarded' ? `
-                        <button
-                          class="btn btn-outline btn-sm"
-                          data-action="review"
-                          data-id="${log.id}"
-                          style="gap:0.3rem"
-                        >
+                        <button class="btn btn-outline btn-sm" data-action="review"
+                          data-id="${log.id}" style="gap:0.3rem">
                           ${renderIcon('scan', 12)} Review
                         </button>
                       ` : ''}
                       ${log.image_url ? `
-                        <a
-                          href="${log.image_url}"
-                          target="_blank"
-                          rel="noopener"
-                          class="btn btn-ghost btn-sm"
-                          style="gap:0.3rem"
-                        >
+                        <a href="${log.image_url}" target="_blank" rel="noopener"
+                          class="btn btn-ghost btn-sm" style="gap:0.3rem">
                           ${renderIcon('reports', 12)} View
                         </a>
                       ` : ''}
@@ -520,7 +461,6 @@ export async function render(container) {
       </div>
     `
 
-    // Review button handlers
     el.querySelectorAll('[data-action="review"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         await openSmartOCRModal(btn.dataset.id)
@@ -529,11 +469,9 @@ export async function render(container) {
     })
   }
 
-  // ── Init ───────────────────────────────────────────────
   loadRecentScans()
 }
 
-// ── Toast helper ─────────────────────────────────────────
 function showToast(msg, type = 'info') {
   const t = document.createElement('div')
   t.className   = `toast toast-${type}`

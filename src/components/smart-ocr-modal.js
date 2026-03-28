@@ -1,4 +1,4 @@
-import { supabase } from '../supabase.js'
+﻿import { supabase } from '../supabase.js'
 import { appStore } from '../store.js'
 import { navigate } from '../router.js'
 import { renderIcon } from './icons.js'
@@ -8,6 +8,11 @@ import { checkSaleAgainstInventory } from '../utils/inventory-resolver.js'
 import { openInventoryResolverModal } from '../components/inventory-resolver-modal.js'
 
 let modalEl = null
+
+function sanitizeNumericInput(value) {
+  const s = String(value == null ? '' : value)
+  return s.replace(/[^0-9.]/g, '').replace(/^(\d*\.?\d*).*$/, '$1')
+}
 
 export async function openSmartOCRModal(logId) {
   if (modalEl) modalEl.remove()
@@ -20,22 +25,29 @@ export async function openSmartOCRModal(logId) {
   if (error || !log) { alert('Could not load scan data'); return }
 
   const [
-    { data: accounts },
+    { data: _accounts },
     { data: inventoryItems },
     { data: customers },
   ] = await Promise.all([
-    supabase.from('cash_accounts').select('id, account_name').eq('store_id', currentStore?.id),
+    supabase.from('cash_accounts').select('id, account_name, account_type, bank_name').eq('store_id', currentStore?.id),
     supabase.from('inventory_items').select('id, item_name, selling_price, unit_cost').eq('store_id', currentStore?.id),
     supabase.from('customers').select('id, name, phone').eq('store_id', currentStore?.id),
   ])
 
-  // ── Parse line items from OCR data ─────────────────────
+  let accounts = _accounts || []
+
+  // â”€â”€ Extract OCR extras stored in parsed_data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const customerHeader = log.parsed_data?.customer_header || {}
+  const transport      = log.parsed_data?.transport       || {}
+  const paymentBank    = log.parsed_data?.payment_bank    || null
+
+  // â”€â”€ Parse line items from OCR data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const rawItems = log.parsed_data?.line_items || []
 
   let items = rawItems.map(i => {
     const qty = Number(i.quantity) || 1
 
-    // Price priority: unit_price → back-calculate from total
+    // Price priority: unit_price â†’ back-calculate from total
     let unitPrice = null
     if (Number(i.unit_price) > 0) {
       unitPrice = Number(i.unit_price)
@@ -60,12 +72,36 @@ export async function openSmartOCRModal(logId) {
     items.push({ name: '', qty: 1, price: null, total: null, matched: null })
   }
 
+  const _tillAccounts = accounts.filter(a => a.account_type === 'till')
+  const _bankAccounts  = accounts.filter(a => a.account_type === 'bank')
+
   let mode      = 'sale'
-  let payMethod = 'cash'
-  let accountId = accounts?.[0]?.id || ''
+  let payMethod = _tillAccounts.length ? 'cash' : (_bankAccounts.length ? 'bank_transfer' : 'credit')
+  let accountId = _tillAccounts.length ? _tillAccounts[0].id : (_bankAccounts.length ? _bankAccounts[0].id : '')
   let docDate   = log.parsed_data?.date || new Date().toISOString().split('T')[0]
 
-  // ── Modal shell ─────────────────────────────────────────
+  // â”€â”€ Pre-fill payment account from detected bank â”€â”€â”€â”€â”€â”€â”€â”€
+  if (paymentBank) {
+    const bankMatch = accounts.find(a => a.account_type === 'bank' &&
+      (a.bank_name||'').toUpperCase().includes(paymentBank.toUpperCase()))
+    if (bankMatch) { payMethod = 'bank_transfer'; accountId = bankMatch.id }
+  }
+
+  // â”€â”€ Customer / transport state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  let custName            = customerHeader.name  || ''
+  let custTarga           = customerHeader.targa || ''
+  let custPlace           = customerHeader.place || ''
+  let saveCustomerCheck   = false
+  let rememberPlaceCheck  = false
+  const matchedCustomer   = (customers||[]).find(c =>
+    custName && c.name.toLowerCase() === custName.toLowerCase()) || null
+
+  let transportAmt        = Number(transport?.amount) || 0
+  let transportWorker     = transport?.worker_note    || ''
+  let transportPaidNow    = !!(transport?.detected)
+  let transportChargeCust = false
+
+  // â”€â”€ Modal shell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const overlay = document.createElement('div')
   overlay.className  = 'modal-overlay'
   overlay.style.zIndex = '300'
@@ -82,8 +118,34 @@ export async function openSmartOCRModal(logId) {
   document.body.appendChild(overlay)
   modalEl = overlay
 
-  function getGrandTotal() {
-    return items.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0)
+  function getGoodsTotal() {
+    return items.reduce((s, i) => s + (Number(i.qty)||0) * (Number(i.price)||0), 0)
+  }
+  function getGrandTotal() { return getGoodsTotal() }
+  function getCustomerTotal() {
+    const g = getGoodsTotal()
+    if (mode === 'sale' && transportAmt > 0 && transportChargeCust) return g + transportAmt
+    return g
+  }
+  function getEstimatedProfit() {
+    let p = items.reduce((s, i) => {
+      const cost = i.matched?.unit_cost || 0
+      return s + ((Number(i.price)||0) - cost) * (Number(i.qty)||0)
+    }, 0)
+    if (transportAmt > 0 && transportPaidNow && !transportChargeCust) p -= transportAmt
+    return p
+  }
+  function transportStatusMsg() {
+    if (!transportAmt || transportAmt <= 0) return ''
+    if (mode === 'sale') {
+      if (!transportPaidNow && !transportChargeCust) return '🏦 You\'ll record this as a payable to the driver'
+      if (!transportPaidNow &&  transportChargeCust) return '📋 Added to customer\'s credit — you\'ll pay driver later'
+      if ( transportPaidNow && !transportChargeCust) return 'You paid transport now - not billed to customer'
+      if ( transportPaidNow &&  transportChargeCust) return '🔄 You pay now — customer owes you back. Tracked for recovery.'
+    } else {
+      return transportPaidNow ? 'Transport paid now' : 'Transport will be paid later'
+    }
+    return ''
   }
 
   function render() {
@@ -123,53 +185,149 @@ export async function openSmartOCRModal(logId) {
           `).join('')}
         </div>
 
-        <!-- Date + Account -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">
-          <div>
-            <label class="form-label">Date</label>
-            <input type="date" class="form-input" id="ocr-date" value="${docDate}">
+        <!-- Customer / Delivery Header -->
+        <div style="background:var(--bg-subtle);border:1px solid var(--border);border-radius:12px;padding:0.875rem;margin-bottom:1rem">
+          <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.5rem">
+            ${mode === 'sale' ? 'Customer' : 'Vendor'} &amp; Delivery Info
+            ${matchedCustomer ? '<span style="color:var(--accent);font-weight:700;margin-left:0.5rem">âœ“ Returning customer</span>' : ''}
+            ${payMethod === 'credit' ? '<span style="color:var(--danger);font-weight:700;margin-left:0.5rem">(required for credit)</span>' : ''}
           </div>
-          <div>
-            <label class="form-label">Cash Account</label>
-            <select class="form-input" id="ocr-account">
-              ${(accounts||[]).map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${a.account_name}</option>`).join('')}
-            </select>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem">
+              <div style="font-size:0.6875rem;font-weight:600;color:${payMethod==='credit'?'var(--danger)':'var(--muted)'};margin-bottom:3px">👤 ${mode === 'sale' ? 'Name' : 'Vendor Name'}${payMethod==='credit'?' *':''}</div>
+              <input class="form-input" id="ocr-cust-name" value="${escHtml(custName)}" placeholder="${mode === 'sale' ? 'Customer' : 'Vendor'} name${payMethod==='credit'?' (required)':''}"
+                list="ocr-cust-list" style="font-weight:600;border-color:${payMethod==='credit'&&!custName?'var(--danger)':''}">
+              <datalist id="ocr-cust-list">${(customers||[]).map(c=>`<option value="${escHtml(c.name)}">`)}</datalist>
+            </div>
+            <div style="flex:1;min-width:80px">
+              <div style="font-size:0.6875rem;font-weight:600;color:var(--muted);margin-bottom:3px">🚗 Targa</div>
+              <input class="form-input" id="ocr-cust-targa" value="${escHtml(custTarga)}" placeholder="Plate"
+                style="font-weight:700;text-transform:uppercase;font-family:monospace;letter-spacing:1px">
+            </div>
+            <div style="flex:1;min-width:100px">
+              <div style="font-size:0.6875rem;font-weight:600;color:var(--muted);margin-bottom:3px">
+              <div style="font-size:0.6875rem;font-weight:600;color:var(--muted);margin-bottom:3px">📍 Place</div>
+              <input class="form-input" id="ocr-cust-place" value="${escHtml(custPlace)}" placeholder="Delivery place">
+            </div>
           </div>
+          <div style="display:flex;gap:1rem;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;font-weight:500;cursor:pointer">
+              <input type="checkbox" id="ocr-save-customer" ${saveCustomerCheck?'checked':''}> Save / update customer
+            </label>
+            <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;font-weight:500;cursor:pointer">
+              <input type="checkbox" id="ocr-remember-place" ${rememberPlaceCheck?'checked':''}> Remember delivery place
+            </label>
+          </div>
+        </div>
+
+        <!-- Date -->
+        <div style="margin-bottom:1rem">
+          <label class="form-label">Date</label>
+          <input type="date" class="form-input" id="ocr-date" value="${docDate}">
         </div>
 
         <!-- Payment (all modes) -->
         <div style="margin-bottom:1rem">
           <label class="form-label">Payment</label>
-          <div style="display:flex;gap:0.375rem;flex-wrap:wrap;margin-top:0.375rem">
-            ${['cash','credit','bank_transfer','telebirr','cbe_birr','other'].map(pm=>`
+
+          <!-- Row 1: Cash + Credit -->
+          <div style="display:flex;gap:0.375rem;flex-wrap:wrap;margin-top:0.375rem;margin-bottom:0.5rem">
+            ${['cash','credit'].map(pm => `
               <button data-pay="${pm}" class="pay-btn" style="
-                padding:0.3rem 0.75rem;border-radius:var(--radius-pill);
+                padding:0.3rem 0.875rem;border-radius:var(--radius-pill);
                 font-size:0.8125rem;font-weight:600;cursor:pointer;
                 border:1.5px solid ${payMethod===pm?'var(--accent)':'var(--border)'};
                 background:${payMethod===pm?'var(--teal-50)':'var(--bg-elevated)'};
                 color:${payMethod===pm?'var(--accent)':'var(--muted)'};
-              ">${PAY_LABELS[pm]||pm}</button>
+              ">${PAY_LABELS[pm]}</button>
             `).join('')}
           </div>
+
+          <!-- Till sub-selector (only when Cash selected) -->
+          ${(() => {
+            const tills = accounts.filter(a => a.account_type === 'till')
+            if (payMethod !== 'cash') return ''
+            return `
+              <div style="
+                margin-bottom:0.5rem;padding:0.625rem 0.75rem;
+                background:var(--bg-subtle);border-radius:10px;border:1px solid var(--border);
+              ">
+                <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.375rem">Cash Account</div>
+                <div style="display:flex;gap:0.375rem;flex-wrap:wrap">
+                  ${tills.length > 0
+                    ? tills.map(a => `
+                        <button data-till="${a.id}" class="till-btn" style="
+                          padding:0.3rem 0.75rem;border-radius:var(--radius-pill);
+                          font-size:0.8125rem;font-weight:600;cursor:pointer;
+                          border:1.5px solid ${accountId===a.id?'var(--accent)':'var(--border)'};
+                          background:${accountId===a.id?'var(--teal-50)':'var(--bg-elevated)'};
+                          color:${accountId===a.id?'var(--accent)':'var(--muted)'};
+                        ">${escHtml(a.account_name)}</button>
+                      `).join('')
+                    : `<span style="font-size:0.8125rem;color:var(--muted)">No till accounts — add one in Settings</span>`
+                  }
+                </div>
+              </div>
+            `
+          })()}
+
+          <!-- Bank accounts row -->
+          <div style="display:flex;gap:0.375rem;flex-wrap:wrap;align-items:center">
+            ${(() => {
+              const banks = accounts.filter(a => a.account_type === 'bank')
+              const active = payMethod === 'bank_transfer'
+              return banks.map(a => `
+                <button data-bank="${a.id}" class="bank-btn" style="
+                  padding:0.3rem 0.875rem;border-radius:var(--radius-pill);
+                  font-size:0.8125rem;font-weight:600;cursor:pointer;
+                  border:1.5px solid ${active && accountId===a.id?'var(--accent)':'var(--border)'};
+                  background:${active && accountId===a.id?'var(--teal-50)':'var(--bg-elevated)'};
+                  color:${active && accountId===a.id?'var(--accent)':'var(--muted)'};
+                ">${escHtml(a.bank_name || a.account_name)}</button>
+              `).join('')
+            })()}
+            <button id="ocr-add-bank" style="
+              width:28px;height:28px;border-radius:50%;
+              background:var(--bg-subtle);color:var(--muted);
+              display:flex;align-items:center;justify-content:center;
+              border:1px solid var(--border);cursor:pointer;
+              font-size:1.125rem;font-weight:700;flex-shrink:0;
+            " title="Add bank account">+</button>
+          </div>
         </div>
-        <div style="margin-bottom:1rem">
-          <details ${payMethod === 'credit' ? 'open' : ''}>
-            <summary style="font-size:0.8125rem;color:var(--muted);cursor:pointer;font-weight:500;">
-              ▶ + ${mode === 'sale' ? 'Customer' : 'Vendor'} info ${payMethod === 'credit' ? '<span style="color:var(--danger)">(Required for credit)</span>' : '(Optional)'}
-            </summary>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
-              <div>
-                <label class="form-label">${mode === 'sale' ? 'Name' : 'Vendor Name'}</label>
-                <input class="form-input" id="ocr-partner-name" placeholder="${payMethod === 'credit' ? 'Required' : 'Optional'}" list="${mode === 'sale' ? 'ocr-cl' : ''}">
-                ${mode === 'sale' ? `<datalist id="ocr-cl">${(customers||[]).map(c=>`<option value="${c.name}">`).join('')}</datalist>` : ''}
+
+        <!-- Transport Fee -->
+        ${(() => {
+          if (!transportAmt && !transport?.detected) return ''
+          const tMsg = transportStatusMsg()
+          const showCharge = mode === 'sale'
+          return `
+            <div style="background:#FFFBEB;border:1.5px solid #FCD34D;border-radius:12px;padding:0.875rem;margin-bottom:1rem">
+              <div style="font-size:0.6875rem;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.5rem">
+              <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem">
+                <div style="flex:1;min-width:110px">
+                  <div style="font-size:0.6875rem;font-weight:600;color:var(--muted);margin-bottom:3px">Amount (ETB)</div>
+                  <input type="number" class="form-input" id="ocr-transport-amt" value="${transportAmt||''}" placeholder="0.00" min="0" step="0.01" inputmode="decimal">
+                </div>
+                <div style="flex:2;min-width:140px">
+                  <div style="font-size:0.6875rem;font-weight:600;color:var(--muted);margin-bottom:3px">Worker / Driver</div>
+                  <input class="form-input" id="ocr-transport-worker" value="${escHtml(transportWorker)}" placeholder="Optional">
+                </div>
               </div>
-              <div>
-                <label class="form-label">Phone</label>
-                <input class="form-input" id="ocr-partner-phone" placeholder="Optional">
+              <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:${tMsg?'0.5rem':'0'}">
+                <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;font-weight:600;cursor:pointer">
+                  <input type="checkbox" id="ocr-transport-paid" ${transportPaidNow?'checked':''}> Paid Now?
+                </label>
+                ${showCharge ? `
+                  <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;font-weight:600;cursor:pointer">
+                    <input type="checkbox" id="ocr-transport-charge" ${transportChargeCust?'checked':''}> Charge Customer?
+                  </label>
+                ` : ''}
               </div>
+              ${tMsg ? `<div style="font-size:0.8125rem;font-weight:600;color:#92400E;padding:0.375rem 0.5rem;background:rgba(255,255,255,0.7);border-radius:6px">${tMsg}</div>` : ''}
             </div>
-          </details>
-        </div>
+          `
+        })()}
 
         <!-- Line items header -->
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
@@ -182,15 +340,29 @@ export async function openSmartOCRModal(logId) {
           ${items.map((item,i) => rowHtml(item,i)).join('')}
         </div>
 
-        <!-- Grand total -->
-        <div style="
-          display:flex;justify-content:space-between;align-items:center;
-          margin-top:1.25rem;padding-top:1rem;border-top:1.5px solid var(--border);
-        ">
-          <span style="font-weight:700">Total</span>
-          <span id="ocr-grand-total" style="
-            font-size:1.375rem;font-weight:800;color:var(--accent);letter-spacing:-0.5px
-          ">${fmt(total)} ETB</span>
+        <!-- Totals -->
+        <div style="margin-top:1.25rem;padding-top:1rem;border-top:1.5px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;font-size:0.875rem;color:var(--muted);margin-bottom:0.375rem">
+            <span>Goods Subtotal</span><span>${fmt(getGoodsTotal())} ETB</span>
+          </div>
+          ${transportAmt > 0 ? `
+            <div style="display:flex;justify-content:space-between;font-size:0.875rem;margin-bottom:0.375rem;color:#92400E;font-weight:600">
+              <span>Transport ${mode==='sale'&&transportChargeCust?'(billed to customer)':transportPaidNow?'(you pay)':'(payable)'}</span>
+              <span>+${fmt(transportAmt)} ETB</span>
+            </div>
+          ` : ''}
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:0.625rem;border-top:1px solid var(--border)">
+            <span style="font-weight:700">${mode==='sale'?'Customer Total':mode==='expense'?'Expense Total':'Inventory Cost'}</span>
+            <span id="ocr-grand-total" style="
+              font-size:1.375rem;font-weight:800;color:var(--accent);letter-spacing:-0.5px
+            ">${fmt(getCustomerTotal())} ETB</span>
+          </div>
+          ${mode==='sale' ? `
+            <div style="display:flex;justify-content:space-between;font-size:0.8125rem;font-weight:700;margin-top:0.375rem;color:${getEstimatedProfit()>=0?'var(--accent)':'var(--danger)'}">
+              <span>Est. Profit</span>
+              <span>${getEstimatedProfit()>=0?'+':''}${fmt(getEstimatedProfit())} ETB</span>
+            </div>
+          ` : ''}
         </div>
 
         <!-- Actions -->
@@ -247,13 +419,24 @@ export async function openSmartOCRModal(logId) {
               style="font-weight:700;background:var(--bg-hover)">
           </div>
         </div>
-        ${item.matched?`
-          <div style="display:inline-flex;align-items:center;gap:0.3rem;margin-top:0.5rem;
-            font-size:0.75rem;font-weight:600;color:var(--teal-700);background:var(--teal-50);
-            border:1px solid var(--teal-200);border-radius:var(--radius-pill);padding:0.2rem 0.5rem;">
-            ${renderIcon('check',11,'var(--teal-700)')} Matched: ${escHtml(item.matched.item_name)}
-          </div>
-        `:''}
+        ${(() => {
+          const tags = []
+          if (item.matched) {
+            tags.push(`<div style="display:inline-flex;align-items:center;gap:0.3rem;margin-top:0.5rem;font-size:0.75rem;font-weight:600;color:var(--teal-700);background:var(--teal-50);border:1px solid var(--teal-200);border-radius:var(--radius-pill);padding:0.2rem 0.5rem;">${renderIcon('check',11,'var(--teal-700)')} Matched: ${escHtml(item.matched.item_name)}</div>`)
+            if (mode === 'sale') {
+              const cost   = Number(item.matched.unit_cost) || 0
+              const margin = cost > 0 ? ((Number(item.price)||0) - cost) * (Number(item.qty)||1) : null
+              if (margin !== null) {
+                const pct  = cost > 0 && Number(item.price) > 0 ? (((Number(item.price)-cost)/Number(item.price))*100).toFixed(1) : ''
+                const col  = margin >= 0 ? '#15803d' : 'var(--danger)'
+                tags.push(`<div style="display:inline-flex;align-items:center;gap:0.25rem;margin-top:0.25rem;font-size:0.75rem;font-weight:600;color:${col};">${margin>=0?'Margin':'LOSS'}: ${margin>=0?'+':''}${fmt(margin)} ETB${pct?' ('+pct+'%)':''}</div>`)
+              }
+            }
+          } else if (mode === 'sale') {
+            tags.push(`<div style="font-size:0.75rem;color:var(--muted);margin-top:0.375rem">âš  No inventory match</div>`)
+          }
+          return tags.join('')
+        })()}
       </div>
     `
   }
@@ -264,10 +447,48 @@ export async function openSmartOCRModal(logId) {
     overlay.addEventListener('click', e => { if (e.target===overlay) close() })
 
     modal.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => { mode=b.dataset.mode; render() }))
-    modal.querySelectorAll('.pay-btn').forEach(b  => b.addEventListener('click', () => { payMethod=b.dataset.pay; render() }))
 
+    modal.querySelectorAll('.pay-btn').forEach(b => b.addEventListener('click', () => {
+      payMethod = b.dataset.pay
+      if (payMethod === 'cash') {
+        const firstTill = accounts.find(a => a.account_type === 'till')
+        accountId = firstTill ? firstTill.id : ''
+      } else if (payMethod === 'credit') {
+        accountId = ''
+      }
+      render()
+    }))
+
+    modal.querySelectorAll('.till-btn').forEach(b => b.addEventListener('click', () => {
+      accountId = b.dataset.till
+      render()
+    }))
+
+    modal.querySelectorAll('.bank-btn').forEach(b => b.addEventListener('click', () => {
+      payMethod  = 'bank_transfer'
+      accountId  = b.dataset.bank
+      render()
+    }))
+
+    modal.querySelector('#ocr-add-bank')?.addEventListener('click', openAddBankModal)
     modal.querySelector('#ocr-date')?.addEventListener('change', e => { docDate=e.target.value })
-    modal.querySelector('#ocr-account')?.addEventListener('change', e => { accountId=e.target.value })
+    modal.querySelector('#ocr-cust-name')?.addEventListener('input',  e => { custName  = e.target.value })
+    modal.querySelector('#ocr-cust-targa')?.addEventListener('input', e => { custTarga = e.target.value.toUpperCase() })
+    modal.querySelector('#ocr-cust-place')?.addEventListener('input', e => { custPlace = e.target.value })
+    modal.querySelector('#ocr-save-customer')?.addEventListener('change',  e => { saveCustomerCheck  = e.target.checked })
+    modal.querySelector('#ocr-remember-place')?.addEventListener('change', e => { rememberPlaceCheck = e.target.checked })
+    modal.querySelector('#ocr-transport-amt')?.addEventListener('input', e => {
+      const clean = sanitizeNumericInput(e.target.value)
+      if (e.target.value !== clean) e.target.value = clean
+      transportAmt = Number(clean) || 0; render()
+    })
+    modal.querySelector('#ocr-transport-worker')?.addEventListener('input', e => { transportWorker = e.target.value })
+    modal.querySelector('#ocr-transport-paid')?.addEventListener('change', e => {
+      transportPaidNow = e.target.checked; render()
+    })
+    modal.querySelector('#ocr-transport-charge')?.addEventListener('change', e => {
+      transportChargeCust = e.target.checked; render()
+    })
 
     modal.querySelector('#ocr-add-row')?.addEventListener('click', () => {
       items.push({ name:'', qty:1, price:null, total:null, matched:null })
@@ -306,17 +527,20 @@ export async function openSmartOCRModal(logId) {
       inp.addEventListener('input', () => {
         const i = parseInt(inp.dataset.idx)
         if (!items[i]) return
-        items[i].qty = parseFloat(inp.value) || 0
+        const clean = sanitizeNumericInput(inp.value)
+        if (inp.value !== clean) inp.value = clean
+        items[i].qty = parseFloat(clean) || 0
         updateRow(i)
       })
     })
 
-    // KEY FIX: price inputs update in-place — no re-render = keyboard stays open
     modal.querySelectorAll('.row-price').forEach(inp => {
       inp.addEventListener('input', () => {
         const i = parseInt(inp.dataset.idx)
         if (!items[i]) return
-        items[i].price = parseFloat(inp.value) || 0
+        const clean = sanitizeNumericInput(inp.value)
+        if (inp.value !== clean) inp.value = clean
+        items[i].price = parseFloat(clean) || 0
         updateRow(i)
       })
     })
@@ -337,44 +561,126 @@ export async function openSmartOCRModal(logId) {
 
   function refreshTotal() {
     const el = modal.querySelector('#ocr-grand-total')
-    if (el) el.textContent = fmt(getGrandTotal()) + ' ETB'
+    if (el) el.textContent = fmt(getCustomerTotal()) + ' ETB'
   }
 
-  // ── Submit ──────────────────────────────────────────────
+  // â”€â”€ Submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async function submit() {
     const valid = items.filter(i => i.name?.trim())
     if (!valid.length) { showToast('Add at least one item','error'); return }
 
     const isCredit = payMethod === 'credit'
-    const partnerName = modal.querySelector('#ocr-partner-name')?.value?.trim()
-    const partnerPhone = modal.querySelector('#ocr-partner-phone')?.value?.trim()
 
-    if (isCredit && !partnerName) {
-      showToast(`${mode === 'sale' ? 'Customer' : 'Vendor'} Name is required for credit transactions`, 'error')
+    // Read live input values before submit
+    custName    = modal.querySelector('#ocr-cust-name')?.value?.trim()  || custName
+
+    if (isCredit && !custName) {
+      showToast(`${mode === 'sale' ? 'Customer' : 'Vendor'} name is required for credit transactions`, 'error')
+      modal.querySelector('#ocr-cust-name')?.focus()
       return
     }
+    custTarga   = (modal.querySelector('#ocr-cust-targa')?.value?.trim() || custTarga).toUpperCase()
+    custPlace   = modal.querySelector('#ocr-cust-place')?.value?.trim()  || custPlace
+    transportAmt    = Number(modal.querySelector('#ocr-transport-amt')?.value)    || transportAmt
+    transportWorker = modal.querySelector('#ocr-transport-worker')?.value?.trim() || transportWorker
 
     const btn = modal.querySelector('#ocr-submit')
     btn.textContent = 'Saving...'
     btn.disabled    = true
 
     const date     = modal.querySelector('#ocr-date')?.value || docDate
-    const accId    = modal.querySelector('#ocr-account')?.value || accountId
-    const totalAmt = getGrandTotal()
+    const accId    = accountId
+    const totalAmt = getGoodsTotal()
 
     try {
+      let saleId = null, creditSaleId = null
       if (mode === 'sale') {
-        await doSale(valid, date, accId, totalAmt, isCredit, partnerName, partnerPhone)
+        const res = await doSale(valid, date, accId, totalAmt, isCredit, custName, null)
+        saleId = res?.saleId; creditSaleId = res?.creditSaleId
       } else if (mode === 'expense') {
-        await doExpense(valid, date, accId, totalAmt, isCredit, partnerName, partnerPhone)
+        await doExpense(valid, date, accId, totalAmt, isCredit, custName, null)
       } else {
-        await doInventory(valid, date, accId, totalAmt, isCredit, partnerName, partnerPhone)
+        await doInventory(valid, date, accId, totalAmt, isCredit, custName, null)
+      }
+
+      // â”€â”€ Transport fee handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      if (transportAmt > 0) {
+        const tfPayload = {
+          store_id:              currentStore?.id,
+          entity_type:          mode,
+          entity_id:            saleId || logId,
+          credit_sale_id:       creditSaleId || null,
+          amount:               transportAmt,
+          worker_name:          transportWorker || null,
+          paid_now:             transportPaidNow,
+          paid_from_account_id: transportPaidNow ? (accId || null) : null,
+          charge_customer:      mode === 'sale' ? transportChargeCust : false,
+        }
+        const { data: tfRow } = await supabase.from('transport_fees').insert(tfPayload).select('id').single()
+
+        if (transportPaidNow) {
+          await supabase.from('expenses').insert({
+            store_id:        currentStore?.id,
+            cash_account_id: accId || null,
+            expense_date:    date,
+            amount:          transportAmt,
+            category:        'transport_fee',
+            description:     `Transport${transportWorker ? ' – ' + transportWorker : ''}`,
+            source:          'ocr',
+            ocr_log_id:      logId,
+          })
+        } else if (!transportChargeCust) {
+          await supabase.from('vendor_debts').insert({
+            store_id:    currentStore?.id,
+            vendor_name: transportWorker || 'Transport Driver',
+            amount_owed: transportAmt,
+            amount_paid: 0,
+            status:      'unpaid',
+            notes:       'Transport fee from OCR scan',
+          })
+        }
+
+        if (mode === 'sale' && transportChargeCust && creditSaleId) {
+          await supabase.from('credit_sales').update({
+            transport_fee:            transportAmt,
+            transport_charge_customer: true,
+          }).eq('id', creditSaleId)
+        }
+      }
+
+      // â”€â”€ Plate history upsert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      if (custTarga) {
+        await supabase.from('plate_history').upsert({
+          plate_number:    custTarga,
+          entity_type:     mode,
+          entity_id:       saleId || logId,
+          customer_name:   custName  || null,
+          last_seen_place: custPlace || null,
+          last_seen_at:    new Date().toISOString(),
+        }, { onConflict: 'plate_number' })
+      }
+
+      // â”€â”€ Customer memory upsert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      if (saveCustomerCheck && custName) {
+        const { data: existCust } = await supabase.from('customers')
+          .select('id').eq('store_id', currentStore?.id).ilike('name', custName).maybeSingle()
+        const custPayload = {
+          store_id:  currentStore?.id,
+          name:      custName,
+          last_targa: custTarga  || null,
+          ...(rememberPlaceCheck && custPlace ? { default_place: custPlace } : {}),
+        }
+        if (existCust?.id) {
+          await supabase.from('customers').update(custPayload).eq('id', existCust.id)
+        } else {
+          await supabase.from('customers').insert(custPayload)
+        }
       }
 
       await supabase.from('ocr_logs').update({
         status:            'applied',
         destination_table: mode==='inventory'?'inventory_items':mode,
-        user_edited_data:  { items:valid, date, totalAmt, mode, partnerName },
+        user_edited_data:  { items:valid, date, totalAmt, mode, custName },
       }).eq('id', logId)
 
       try { await audit.action('ocr_applied', { logId, mode, totalAmt }) } catch(_){}
@@ -391,15 +697,20 @@ export async function openSmartOCRModal(logId) {
     }
   }
 
-  async function doSale(valid, date, accId, totalAmt, isCredit, custName, custPhone) {
+  async function doSale(valid, date, accId, totalAmt, isCredit, partnerName, partnerPhone) {
+    const customerTotal = getCustomerTotal()
     const { data: sale, error } = await supabase.from('sales').insert({
       store_id:        currentStore?.id,
       cash_account_id: isCredit ? null : (accId||null),
       sale_date:       date,
-      total_amount:    totalAmt,
+      total_amount:    customerTotal,
       payment_method:  payMethod,
       source:          'ocr',
       ocr_log_id:      logId,
+      transport_fee:   transportAmt > 0 ? transportAmt : null,
+      delivery_place:  custPlace  || null,
+      targa:           custTarga  || null,
+      payment_bank:    paymentBank || null,
     }).select().single()
 
     if (error) throw error
@@ -426,25 +737,38 @@ export async function openSmartOCRModal(logId) {
       }
     }, 1500)
 
-    if (custName) {
+    const name = partnerName || custName
+    let custId = null, cSaleId = null
+    if (name) {
       const { data: existing } = await supabase.from('customers')
-        .select('id').eq('store_id', currentStore?.id).ilike('name', custName).maybeSingle()
-
-      let custId = existing?.id
+        .select('id').eq('store_id', currentStore?.id).ilike('name', name).maybeSingle()
+      custId = existing?.id
       if (!custId) {
         const { data: nc } = await supabase.from('customers').insert({
-          store_id: currentStore?.id, name: custName, phone: custPhone||null,
+          store_id: currentStore?.id, name, phone: partnerPhone || null,
         }).select('id').single()
         custId = nc?.id
       }
-
-      if (isCredit && custId) {
-        await supabase.from('credit_sales').insert({
-          store_id: currentStore?.id, sale_id: sale.id,
-          customer_id: custId, amount_owed: totalAmt, status: 'unpaid',
-        })
-      }
     }
+
+    if (custId) {
+      await supabase.from('sales').update({ customer_id: custId }).eq('id', sale.id)
+    }
+
+    if (isCredit && custId) {
+      const { data: cs } = await supabase.from('credit_sales').insert({
+        store_id:                  currentStore?.id,
+        sale_id:                   sale.id,
+        customer_id:               custId,
+        amount_owed:               customerTotal,
+        status:                    'unpaid',
+        transport_fee:             transportAmt > 0 && transportChargeCust ? transportAmt : 0,
+        transport_charge_customer: mode === 'sale' && transportChargeCust,
+      }).select('id').single()
+      cSaleId = cs?.id
+    }
+
+    return { saleId: sale.id, creditSaleId: cSaleId }
   }
 
   async function doExpense(valid, date, accId, totalAmt, isCredit, vendorName, vendorPhone) {
@@ -456,6 +780,9 @@ export async function openSmartOCRModal(logId) {
       description:     valid.map(i=>i.name).join(', '),
       source:          'ocr',
       ocr_log_id:      logId,
+      transport_fee:   transportAmt > 0 ? transportAmt : null,
+      targa:           custTarga  || null,
+      delivery_place:  custPlace  || null,
     })
     if (error) throw error
 
@@ -474,12 +801,16 @@ export async function openSmartOCRModal(logId) {
   async function doInventory(valid, date, accId, totalAmt, isCredit, vendorName, vendorPhone) {
     for (const item of valid) {
       const { error } = await supabase.from('inventory_items').insert({
-        store_id:      currentStore?.id,
-        item_name:     item.name,
-        quantity:      item.qty   || 0,
-        unit_cost:     item.price || null,
-        selling_price: item.price || null,
-        supplier:      vendorName || null,
+        store_id:             currentStore?.id,
+        item_name:            item.name,
+        quantity:             item.qty   || 0,
+        unit_cost:            item.price || null,
+        selling_price:        item.price || null,
+        supplier:             vendorName || null,
+        transport_fee:        transportAmt > 0 ? transportAmt : null,
+        targa:                custTarga  || null,
+        delivery_place:       custPlace  || null,
+        paid_from_account_id: (!isCredit && accId) ? accId : null,
       })
       if (error) throw error
     }
@@ -506,6 +837,119 @@ export async function openSmartOCRModal(logId) {
     }
   }
 
+  async function openAddBankModal() {
+    const bankOverlay = document.createElement('div')
+    bankOverlay.style.cssText = `
+      position:fixed;inset:0;background:rgba(0,0,0,0.55);
+      display:flex;align-items:center;justify-content:center;
+      z-index:500;padding:1rem;
+    `
+
+    const bankModal = document.createElement('div')
+    bankModal.style.cssText = `
+      background:var(--bg-elevated);border-radius:16px;
+      width:100%;max-width:400px;
+      box-shadow:var(--shadow-lg);border:1px solid var(--border);
+      overflow:hidden;
+    `
+
+    bankModal.innerHTML = `
+      <div style="
+        display:flex;align-items:center;justify-content:space-between;
+        padding:1rem 1.25rem;background:var(--dark);
+      ">
+        <div style="font-weight:700;color:#fff;font-size:0.9375rem">Add Payment Account</div>
+        <button id="bm-close" style="
+          width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.1);
+          display:flex;align-items:center;justify-content:center;
+          color:rgba(255,255,255,0.7);cursor:pointer;border:none;
+        ">${renderIcon('close', 14)}</button>
+      </div>
+      <div style="padding:1.25rem;display:flex;flex-direction:column;gap:0.875rem">
+        <div>
+          <label class="form-label">Account Name *</label>
+          <input class="form-input" id="bm-name" placeholder="e.g. Main Till, CBE Account">
+        </div>
+        <div>
+          <label class="form-label">Type</label>
+          <select class="form-input" id="bm-type">
+            <option value="till">
+            <option value="bank">🏦 Bank Account</option>
+          </select>
+        </div>
+        <div id="bm-bank-fields" style="display:none;flex-direction:column;gap:0.625rem">
+          <div>
+            <label class="form-label">Bank Name</label>
+            <input class="form-input" id="bm-bank-name" placeholder="e.g. Commercial Bank of Ethiopia">
+          </div>
+          <div>
+            <label class="form-label">Account Number</label>
+            <input class="form-input" id="bm-acc-num" placeholder="e.g. 1000123456789">
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Opening Balance (ETB)</label>
+          <input class="form-input" type="number" id="bm-balance" value="0" min="0" step="0.01" inputmode="decimal">
+        </div>
+        <div style="display:flex;gap:0.625rem;margin-top:0.25rem">
+          <button class="btn btn-outline" id="bm-cancel" style="flex:1;justify-content:center">Cancel</button>
+          <button class="btn btn-primary" id="bm-save" style="flex:2;justify-content:center">Save Account</button>
+        </div>
+      </div>
+    `
+
+    bankOverlay.appendChild(bankModal)
+    document.body.appendChild(bankOverlay)
+
+    const closeBank = () => bankOverlay.remove()
+    bankModal.querySelector('#bm-close').addEventListener('click', closeBank)
+    bankModal.querySelector('#bm-cancel').addEventListener('click', closeBank)
+    bankOverlay.addEventListener('click', e => { if (e.target === bankOverlay) closeBank() })
+
+    const typeSelect  = bankModal.querySelector('#bm-type')
+    const bankFields  = bankModal.querySelector('#bm-bank-fields')
+    typeSelect.addEventListener('change', () => {
+      bankFields.style.display = typeSelect.value === 'bank' ? 'flex' : 'none'
+    })
+
+    bankModal.querySelector('#bm-save').addEventListener('click', async () => {
+      const name = bankModal.querySelector('#bm-name').value.trim()
+      if (!name) { showToast('Account name is required', 'error'); return }
+
+      const type     = typeSelect.value
+      const balance  = Number(bankModal.querySelector('#bm-balance').value) || 0
+      const bankName = type === 'bank' ? (bankModal.querySelector('#bm-bank-name').value.trim() || null) : null
+      const bankNum  = type === 'bank' ? (bankModal.querySelector('#bm-acc-num').value.trim()  || null) : null
+
+      const saveBtn = bankModal.querySelector('#bm-save')
+      saveBtn.textContent = 'Saving...'
+      saveBtn.disabled    = true
+
+      const { data: newAccount, error } = await supabase.from('cash_accounts').insert({
+        store_id:       currentStore?.id,
+        account_name:   name,
+        account_type:   type,
+        balance,
+        bank_name:      bankName,
+        account_number: bankNum,
+      }).select('id, account_name, account_type, bank_name').single()
+
+      if (error) {
+        showToast('Failed to create account: ' + error.message, 'error')
+        saveBtn.textContent = 'Save Account'
+        saveBtn.disabled    = false
+        return
+      }
+
+      accounts  = [...accounts, newAccount]
+      accountId = newAccount.id
+      payMethod = newAccount.account_type === 'bank' ? 'bank_transfer' : 'cash'
+      showToast('Account created', 'success')
+      closeBank()
+      render()
+    })
+  }
+
   function close() {
     if (modalEl) { modalEl.remove(); modalEl = null }
   }
@@ -513,7 +957,7 @@ export async function openSmartOCRModal(logId) {
   render()
 }
 
-// ── Helpers ──────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PAY_LABELS = {
   cash:'Cash', credit:'Credit', bank_transfer:'Bank',
   telebirr:'Telebirr', cbe_birr:'CBE Birr', other:'Other',

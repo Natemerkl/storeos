@@ -1,4 +1,5 @@
 import { loadPage } from './main.js'
+import { pushRoute } from './utils/swipe-nav.js'
 
 const routes = {
   '/':              'dashboard',
@@ -32,6 +33,7 @@ export function initRouter() {
 export function navigate(path) {
   if (window.location.pathname === path) return // no-op if same page
   window.history.pushState({}, '', path)
+  pushRoute(path)
   handleRoute()
 }
 

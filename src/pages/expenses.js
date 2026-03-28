@@ -116,6 +116,23 @@ export async function render(container) {
           <label class="form-label">Notes</label>
           <input class="form-input" id="f-notes" placeholder="Optional notes">
         </div>
+        <div style="background:var(--bg-subtle);border-radius:10px;padding:0.75rem;margin-top:0.25rem">
+          <div style="font-size:0.8125rem;font-weight:700;color:var(--muted);margin-bottom:0.625rem;text-transform:uppercase;letter-spacing:0.4px">🚚 Transport / Delivery (optional)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.625rem">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Transport Fee (ETB)</label>
+              <input type="number" class="form-input" id="f-transport" min="0" placeholder="0.00">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Plate / Targa</label>
+              <input class="form-input" id="f-targa" placeholder="e.g. AA-12345" style="font-family:monospace;text-transform:uppercase">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Delivery Place</label>
+              <input class="form-input" id="f-place" placeholder="e.g. Merkato">
+            </div>
+          </div>
+        </div>
         <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem">
           <button class="btn btn-outline" id="modal-cancel">Cancel</button>
           <button class="btn btn-primary" id="modal-save">Save Expense</button>
@@ -181,7 +198,7 @@ export async function render(container) {
   function updateSummary() {
     const now       = new Date()
     const todayStr  = now.toISOString().split('T')[0]
-    const weekAgo   = new Date(now - 7  * 86400000).toISOString().split('T')[0]
+    const weekAgo   = new Date(now - 7 * 86400000).toISOString().split('T')[0]
     const monthStart= `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`
 
     const todayAmt  = allExpenses.filter(e => e.expense_date === todayStr).reduce((s,e) => s + Number(e.amount), 0)
@@ -222,7 +239,7 @@ export async function render(container) {
   function renderTable(items) {
     const tbody = container.querySelector('#exp-body')
     if (items.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No expenses found</div></div></td></tr>`
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No expenses found</div></div></td></tr>`
       return
     }
 
@@ -231,7 +248,10 @@ export async function render(container) {
         <td>${formatDate(e.expense_date)}</td>
         <td>${e.category ? `<span class="badge badge-grey">${e.category}</span>` : '—'}</td>
         <td>${e.description || '—'}</td>
-        <td style="font-weight:600;color:var(--danger)">-${fmt(e.amount)} ETB</td>
+        <td style="font-weight:600;color:var(--danger)">
+          -${fmt(e.amount)} ETB
+          ${e.transport_fee ? `<div style="font-size:11px;color:#92400E;margin-top:2px">🚚 +${fmt(e.transport_fee)} transport</div>` : ''}
+        </td>
         <td><span class="badge ${e.cash_accounts?.account_type === 'bank' ? 'badge-blue' : 'badge-teal'}">
           ${e.cash_accounts ? (e.cash_accounts.account_type === 'bank' ? '🏦 ' : '🏪 ') + (e.cash_accounts.account_name || e.cash_accounts.name) : '—'}
         </span></td>
@@ -272,11 +292,14 @@ export async function render(container) {
   function openAddModal() {
     editingId = null
     container.querySelector('#modal-title').textContent = 'Add Expense'
-    container.querySelector('#f-date').value     = today
-    container.querySelector('#f-amount').value   = ''
-    container.querySelector('#f-category').value = ''
-    container.querySelector('#f-desc').value     = ''
-    container.querySelector('#f-notes').value    = ''
+    container.querySelector('#f-date').value      = today
+    container.querySelector('#f-amount').value    = ''
+    container.querySelector('#f-category').value  = ''
+    container.querySelector('#f-desc').value      = ''
+    container.querySelector('#f-notes').value     = ''
+    container.querySelector('#f-transport').value = ''
+    container.querySelector('#f-targa').value     = ''
+    container.querySelector('#f-place').value     = ''
     container.querySelector('#exp-modal').style.display = 'flex'
   }
 
@@ -285,11 +308,14 @@ export async function render(container) {
     if (!e) return
     editingId = id
     container.querySelector('#modal-title').textContent = 'Edit Expense'
-    container.querySelector('#f-date').value     = e.expense_date || today
-    container.querySelector('#f-amount').value   = e.amount       || ''
-    container.querySelector('#f-category').value = e.category     || ''
-    container.querySelector('#f-desc').value     = e.description  || ''
-    container.querySelector('#f-notes').value    = e.notes        || ''
+    container.querySelector('#f-date').value      = e.expense_date   || today
+    container.querySelector('#f-amount').value    = e.amount         || ''
+    container.querySelector('#f-category').value  = e.category       || ''
+    container.querySelector('#f-desc').value      = e.description    || ''
+    container.querySelector('#f-notes').value     = e.notes          || ''
+    container.querySelector('#f-transport').value = e.transport_fee  || ''
+    container.querySelector('#f-targa').value     = e.targa          || ''
+    container.querySelector('#f-place').value     = e.delivery_place || ''
     if (e.cash_account_id) container.querySelector('#f-account').value = e.cash_account_id
     container.querySelector('#exp-modal').style.display = 'flex'
   }
@@ -299,10 +325,14 @@ export async function render(container) {
   }
 
   async function saveExpense() {
-    const amount    = Number(container.querySelector('#f-amount').value)
-    const accountId = container.querySelector('#f-account').value
+    const amount     = Number(container.querySelector('#f-amount').value)
+    const accountId  = container.querySelector('#f-account').value
     if (!amount || amount <= 0) { alert('Enter a valid amount'); return }
     if (!accountId) { alert('Please select which account this expense came from'); return }
+
+    const transportFee  = Number(container.querySelector('#f-transport').value) || 0
+    const targa         = container.querySelector('#f-targa').value.trim().toUpperCase() || null
+    const deliveryPlace = container.querySelector('#f-place').value.trim() || null
 
     const payload = {
       store_id:        currentStore?.id,
@@ -313,6 +343,9 @@ export async function render(container) {
       description:     container.querySelector('#f-desc').value     || null,
       notes:           container.querySelector('#f-notes').value    || null,
       source:          'manual',
+      transport_fee:   transportFee || null,
+      targa,
+      delivery_place:  deliveryPlace,
     }
 
     if (editingId) {
@@ -336,6 +369,18 @@ export async function render(container) {
       // Deduct from cash account
       const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', accountId).single()
       if (acc) await supabase.from('cash_accounts').update({ balance: Number(acc.balance) - amount }).eq('id', accountId)
+
+      // Insert transport fee record if applicable
+      if (transportFee > 0 && exp?.id) {
+        await supabase.from('transport_fees').insert({
+          store_id:        currentStore?.id,
+          entity_type:     'expense',
+          entity_id:       exp.id,
+          amount:          transportFee,
+          paid_now:        false,
+          charge_customer: false,
+        })
+      }
     }
 
     invalidateAfterExpense()

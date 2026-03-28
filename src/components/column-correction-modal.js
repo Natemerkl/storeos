@@ -11,7 +11,7 @@ const COLUMN_OPTIONS = [
   { value: 'ignore',      label: '— Ignore this column —' },
 ];
 
-export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan }) {
+export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan, customerHeader = {}, transport = null }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.style.zIndex = '400';
@@ -20,6 +20,10 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
   // Keep a stable original list to maintain index positions for the final output
   const originalColumns = columns.map((c, i) => ({ ...c, index: c.index !== undefined ? c.index : i }));
   let items = originalColumns.map(c => ({ ...c }));
+
+  let custName  = customerHeader.name  || ''
+  let custTarga = customerHeader.targa || ''
+  let custPlace = customerHeader.place || ''
 
   function renderList() {
     return items.map((col) => `
@@ -152,6 +156,51 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
         font-weight: 600;
         padding: 0.4rem 0.5rem;
       }
+      .ccm-cust-strip {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.625rem 0.75rem;
+        margin-bottom: 0.625rem;
+      }
+      .ccm-cust-field {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        flex: 1;
+        min-width: 100px;
+      }
+      .ccm-cust-field span {
+        font-size: 1rem;
+        flex-shrink: 0;
+      }
+      .ccm-cust-field input {
+        flex: 1;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        padding: 0.3rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--dark);
+        min-width: 0;
+      }
+      .ccm-transport-notice {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: #FFF9EC;
+        border: 1px solid #FDE68A;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        margin-bottom: 0.625rem;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: #92400E;
+      }
       .ccm-actions {
         display: flex;
         gap: 0.625rem;
@@ -192,6 +241,31 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
 
         <!-- Mapping: scrolls independently -->
         <div class="ccm-map-panel">
+
+          <!-- Customer header strip -->
+          <div class="ccm-cust-strip">
+            <div class="ccm-cust-field">
+              <span>👤</span>
+              <input id="ccm-cust-name" placeholder="Customer name" value="${custName}">
+            </div>
+            <div class="ccm-cust-field">
+              <span>🚗</span>
+              <input id="ccm-cust-targa" placeholder="Plate / Targa" value="${custTarga}" style="text-transform:uppercase;font-family:monospace">
+            </div>
+            <div class="ccm-cust-field">
+              <span>📍</span>
+              <input id="ccm-cust-place" placeholder="Delivery place" value="${custPlace}">
+            </div>
+          </div>
+
+          <!-- Transport notice -->
+          ${transport?.detected ? `
+            <div class="ccm-transport-notice">
+              🚚 Transport fee detected: ${transport.amount ? Number(transport.amount).toLocaleString('en-ET') + ' ETB' : ''}
+              &nbsp;— configure it in the next screen.
+            </div>
+          ` : ''}
+
           <div id="col-list-container">
             ${renderList()}
           </div>
@@ -212,6 +286,10 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
   document.body.appendChild(overlay);
 
   function attachListEvents() {
+    overlay.querySelector('#ccm-cust-name')?.addEventListener('input',  e => { custName  = e.target.value })
+    overlay.querySelector('#ccm-cust-targa')?.addEventListener('input', e => { custTarga = e.target.value.toUpperCase() })
+    overlay.querySelector('#ccm-cust-place')?.addEventListener('input', e => { custPlace = e.target.value })
+
     const listContainer = overlay.querySelector('#col-list-container');
     
     listContainer.querySelectorAll('.col-type-select').forEach(select => {
@@ -248,7 +326,7 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan 
     });
     document.body.style.overflow = _prevOverflow;
     overlay.remove();
-    if (onSave) onSave(manualTypes);
+    if (onSave) onSave(manualTypes, { name: custName || null, targa: custTarga || null, place: custPlace || null });
   });
 
   overlay.querySelector('#btn-col-rescan').addEventListener('click', () => {

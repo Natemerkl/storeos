@@ -14,11 +14,13 @@ import { appStore } from './store.js'
 import { renderNav } from './components/nav.js'
 import { initMobileNav } from './components/mobile-nav.js'
 import { initTableEnhancer } from './utils/mobile-tables.js'
+import { initSwipeNav, pushRoute, canGoBack, canGoForward, getPrevPath, getNextPath } from './utils/swipe-nav.js'
 
 const app = document.getElementById('app')
 let navEl         = null
 let contentEl     = null
 let isInitialized = false  // prevents double-init from onAuthStateChange
+let isSwipeNavigation = false
 
 // ── Loading screen ─────────────────────────────────────────
 function showLoadingScreen() {
@@ -106,6 +108,16 @@ export function buildLayout() {
     window._tblEnhanced = true
     initTableEnhancer()
   }
+
+  initSwipeNav(
+    () => document.querySelector('.main-content'),
+    (direction) => {
+      isSwipeNavigation = true
+      if (direction === 'back'    && canGoBack())    navigate(getPrevPath())
+      if (direction === 'forward' && canGoForward()) navigate(getNextPath())
+      setTimeout(() => { isSwipeNavigation = false }, 300)
+    }
+  )
 }
 
 // ── Load a page ────────────────────────────────────────────
@@ -129,6 +141,16 @@ export async function loadPage(pageName) {
     // Verify container still valid before rendering
     if (contentEl && document.body.contains(contentEl)) {
       mod.render(contentEl)
+
+      if (!isSwipeNavigation) {
+        contentEl.style.opacity   = '0'
+        contentEl.style.transform = 'translateY(6px)'
+        contentEl.style.transition = 'opacity 0.2s, transform 0.2s'
+        requestAnimationFrame(() => {
+          contentEl.style.opacity   = '1'
+          contentEl.style.transform = 'translateY(0)'
+        })
+      }
     }
   } catch(err) {
     console.error('loadPage error:', pageName, err)
@@ -268,6 +290,7 @@ async function init() {
 
   appStore.getState().setUser(session.user)
   await goToApp(session.user)
+  pushRoute(window.location.pathname)
 }
 
 // Register service worker after init

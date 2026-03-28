@@ -9,6 +9,11 @@ import { getInventory, invalidateAfterSale } from '../utils/db.js'
 import { checkSaleAgainstInventory } from '../utils/inventory-resolver.js'
 import { openInventoryResolverModal } from '../components/inventory-resolver-modal.js'
 
+function sanitizeNumericInput(value) {
+  const s = String(value == null ? '' : value)
+  return s.replace(/[^0-9.]/g, '').replace(/^(\d*\.?\d*).*$/, '$1')
+}
+
 let viewMode    = localStorage.getItem('pos-view') || 'grid'
 let cart        = []
 let allItems    = []
@@ -23,7 +28,7 @@ export async function render(container) {
   const [items, { data: custs }, { data: accs }] = await Promise.all([
     getInventory(),
     supabase.from('customers').select('id, name, phone').in('store_id', storeIds).order('name'),
-    supabase.from('cash_accounts').select('id, account_name, account_type').in('store_id', storeIds).order('account_name'),
+    supabase.from('cash_accounts').select('id, account_name, account_type, bank_name').in('store_id', storeIds).order('account_name'),
   ])
 
   allItems  = items  || []
@@ -115,11 +120,7 @@ export async function render(container) {
         <div class="pos-checkout" id="pos-checkout" style="display:none">
           <div style="margin-bottom:0.75rem">
             <div class="form-label" style="margin-bottom:0.4rem">Payment</div>
-            <div class="pay-methods" id="pay-methods">
-              ${['cash','bank_transfer','telebirr','cbe_birr','credit','other'].map(pm => `
-                <button class="pay-method-btn ${pm==='cash'?'active':''}" data-pay="${pm}">${PAY_LABELS[pm]}</button>
-              `).join('')}
-            </div>
+            <div id="pos-payment-section"></div>
           </div>
           <div id="credit-fields" style="display:none;margin-bottom:0.75rem">
             <div class="credit-banner">
@@ -159,45 +160,6 @@ export async function render(container) {
               </div>
             </details>
           </div>
-          <div id="account-section" style="margin-bottom:0.75rem">
-            <label class="form-label">Account</label>
-            <select class="form-input" id="sale-account">
-              ${accounts.map(a=>`<option value="${a.id}">${a.account_name}</option>`).join('')}
-              <option value="__new__" style="color:var(--accent);font-weight:600">+ Create New Account</option>
-            </select>
-            <div id="new-pos-account-form" style="display:none;background:var(--bg-subtle);padding:0.75rem;border-radius:8px;margin-top:0.5rem">
-              <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.5rem;color:var(--accent)">💳 Create New Account</div>
-              <div class="form-group" style="margin-bottom:0.5rem">
-                <label class="form-label">Account Name *</label>
-                <input class="form-input" id="pos-new-acc-name" placeholder="e.g. CBE Main Account">
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
-                <div class="form-group">
-                  <label class="form-label" id="pos-acc-number-label">Account Number</label>
-                  <input class="form-input" id="pos-new-acc-number" placeholder="Optional">
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Account Type</label>
-                  <select class="form-input" id="pos-new-acc-type">
-                    <option value="bank">Bank</option>
-                    <option value="till">Cash/Till</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-group" style="margin-bottom:0.5rem">
-                <label class="form-label">Starting Balance (ETB)</label>
-                <input class="form-input" id="pos-new-acc-balance" type="number" min="0" placeholder="0.00" step="0.01">
-              </div>
-              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
-                <input type="checkbox" id="pos-new-acc-calculate" style="width:16px;height:16px;accent-color:var(--accent)">
-                <label for="pos-new-acc-calculate" style="font-size:0.875rem;cursor:pointer">Auto-calculate balance</label>
-              </div>
-              <div style="display:flex;gap:0.5rem">
-                <button class="btn btn-outline btn-sm" id="pos-cancel-new-account" style="flex:1">Cancel</button>
-                <button class="btn btn-primary btn-sm" id="pos-save-new-account" style="flex:1">Save Account</button>
-              </div>
-            </div>
-          </div>
           <div style="margin-bottom:0.875rem">
             <label class="form-label">Note (optional)</label>
             <input class="form-input" id="sale-note"
@@ -208,12 +170,36 @@ export async function render(container) {
             <input class="form-input" id="sale-phone"
               placeholder="09xxxxxxxx">
           </div>
+          <div style="background:var(--bg-subtle);border-radius:10px;padding:0.625rem 0.75rem;margin-bottom:0.875rem">
+            <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.5rem">ðŸšš Transport / Delivery (optional)</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
+              <div>
+                <label class="form-label" style="font-size:0.75rem">Fee (ETB)</label>
+                <input type="number" class="form-input" id="pos-transport-fee" min="0" placeholder="0.00" step="0.01" inputmode="decimal">
+              </div>
+              <div>
+                <label class="form-label" style="font-size:0.75rem">Plate / Targa</label>
+                <input class="form-input" id="pos-transport-targa" placeholder="AA-12345" style="font-family:monospace;text-transform:uppercase">
+              </div>
+            </div>
+            <div style="margin-bottom:0.5rem">
+              <label class="form-label" style="font-size:0.75rem">Delivery Place</label>
+              <input class="form-input" id="pos-transport-place" placeholder="e.g. Merkato">
+            </div>
+            <div id="pos-transport-pay-row" style="display:none">
+              <div style="font-size:0.75rem;font-weight:600;color:var(--muted);margin-bottom:0.25rem">Transport Payment</div>
+              <div style="display:flex;gap:0.375rem">
+                <button type="button" id="pos-tp-yes" style="padding:0.2rem 0.625rem;border-radius:var(--radius-pill);font-size:0.75rem;font-weight:600;cursor:pointer;border:1.5px solid var(--accent);background:var(--teal-50);color:var(--accent)">Paid Now</button>
+                <button type="button" id="pos-tp-no" style="padding:0.2rem 0.625rem;border-radius:var(--radius-pill);font-size:0.75rem;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:var(--bg-elevated);color:var(--muted)">Owe Driver</button>
+              </div>
+            </div>
+          </div>
           <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.875rem">
             <input type="checkbox" id="bulk-toggle"
               style="width:16px;height:16px;accent-color:var(--accent)">
             <label for="bulk-toggle"
               style="font-size:0.875rem;font-weight:500;cursor:pointer">
-              Bulk sale — skip stock deduction
+              Bulk sale â€” skip stock deduction
             </label>
           </div>
           <div style="position:sticky;bottom:0;background:var(--bg-subtle);
@@ -227,8 +213,8 @@ export async function render(container) {
       </div>
     </div>
 
-    <!-- ── MOBILE CART SHEET ──────────────────────────────── -->
-    <!-- Trigger button — sticky above nav -->
+    <!-- â”€â”€ MOBILE CART SHEET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+    <!-- Trigger button â€” sticky above nav -->
     <div id="mobile-cart-trigger" style="display:none">
       <button id="btn-open-cart" aria-label="Open cart">
         <div style="position:relative">
@@ -359,50 +345,26 @@ export async function render(container) {
         <!-- Payment method -->
         <div style="margin-bottom:12px">
           <div class="form-label" style="margin-bottom:6px">Payment</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap" id="sheet-pay-methods">
-            ${['cash','bank_transfer','telebirr','cbe_birr','credit','other'].map(pm => `
-              <button class="sheet-pay-btn ${pm==='cash'?'active':''}" data-pay="${pm}">${PAY_LABELS[pm]}</button>
-            `).join('')}
-          </div>
+          <div id="sheet-payment-section"></div>
         </div>
 
-        <!-- Account -->
-        <div id="sheet-account-section" style="margin-bottom:12px">
-          <label class="form-label">Account</label>
-          <select class="form-input" id="sheet-account">
-            ${accounts.map(a=>`<option value="${a.id}">${a.account_name}</option>`).join('')}
-            <option value="__new__" style="color:var(--accent);font-weight:600">+ Create New Account</option>
-          </select>
-          <div id="sheet-new-account-form" style="display:none;background:var(--bg-subtle);padding:0.75rem;border-radius:8px;margin-top:0.5rem">
-            <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.5rem;color:var(--accent)">💳 Create New Account</div>
-            <div class="form-group" style="margin-bottom:0.5rem">
-              <label class="form-label">Account Name *</label>
-              <input class="form-input" id="sheet-new-acc-name" placeholder="e.g. CBE Main Account">
+        <!-- Credit fields (mobile) -->
+        <div id="sheet-credit-fields" style="display:none;margin-bottom:12px">
+          <div class="credit-banner">
+            ${renderIcon('user', 14)} Customer required for credit sale
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
+            <div>
+              <label class="form-label">Name *</label>
+              <input class="form-input" id="sheet-credit-name" placeholder="Customer name"
+                list="sheet-cust-list">
+              <datalist id="sheet-cust-list">
+                ${customers.map(c=>`<option value="${c.name}">`).join('')}
+              </datalist>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
-              <div class="form-group">
-                <label class="form-label" id="sheet-acc-number-label">Account Number</label>
-                <input class="form-input" id="sheet-new-acc-number" placeholder="Optional">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Account Type</label>
-                <select class="form-input" id="sheet-new-acc-type">
-                  <option value="bank">Bank</option>
-                  <option value="till">Cash/Till</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group" style="margin-bottom:0.5rem">
-              <label class="form-label">Starting Balance (ETB)</label>
-              <input class="form-input" id="sheet-new-acc-balance" type="number" min="0" placeholder="0.00" step="0.01">
-            </div>
-            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
-              <input type="checkbox" id="sheet-new-acc-calculate" style="width:16px;height:16px;accent-color:var(--accent)">
-              <label for="sheet-new-acc-calculate" style="font-size:0.875rem;cursor:pointer">Auto-calculate balance</label>
-            </div>
-            <div style="display:flex;gap:0.5rem">
-              <button class="btn btn-outline btn-sm" id="sheet-cancel-new-account" style="flex:1">Cancel</button>
-              <button class="btn btn-primary btn-sm" id="sheet-save-new-account" style="flex:1">Save Account</button>
+            <div>
+              <label class="form-label">Phone</label>
+              <input class="form-input" id="sheet-credit-phone" placeholder="09xxxxxxxx">
             </div>
           </div>
         </div>
@@ -414,13 +376,39 @@ export async function render(container) {
             placeholder="e.g. delivery, invoice ref...">
         </div>
 
+        <!-- Transport / Delivery (mobile) -->
+        <div style="background:var(--bg-subtle);border-radius:10px;padding:0.625rem 0.75rem;margin-bottom:12px">
+          <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.5rem">Transport / Delivery (optional)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
+            <div>
+              <label class="form-label" style="font-size:0.75rem">Fee (ETB)</label>
+              <input type="number" class="form-input" id="sheet-transport-fee" min="0" placeholder="0.00" step="0.01" inputmode="decimal">
+            </div>
+            <div>
+              <label class="form-label" style="font-size:0.75rem">Plate / Targa</label>
+              <input class="form-input" id="sheet-transport-targa" placeholder="AA-12345" style="font-family:monospace;text-transform:uppercase">
+            </div>
+          </div>
+          <div style="margin-bottom:0.5rem">
+            <label class="form-label" style="font-size:0.75rem">Delivery Place</label>
+            <input class="form-input" id="sheet-transport-place" placeholder="e.g. Merkato">
+          </div>
+          <div id="sheet-transport-pay-row" style="display:none">
+            <div style="font-size:0.75rem;font-weight:600;color:var(--muted);margin-bottom:0.25rem">Transport Payment</div>
+            <div style="display:flex;gap:0.375rem">
+              <button type="button" id="sheet-tp-yes" style="padding:0.2rem 0.625rem;border-radius:var(--radius-pill);font-size:0.75rem;font-weight:600;cursor:pointer;border:1.5px solid var(--accent);background:var(--teal-50);color:var(--accent)">Paid Now</button>
+              <button type="button" id="sheet-tp-no" style="padding:0.2rem 0.625rem;border-radius:var(--radius-pill);font-size:0.75rem;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:var(--bg-elevated);color:var(--muted)">Owe Driver</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Bulk toggle -->
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
           <input type="checkbox" id="sheet-bulk"
             style="width:16px;height:16px;accent-color:var(--accent)">
           <label for="sheet-bulk"
             style="font-size:0.875rem;font-weight:500;cursor:pointer">
-            Bulk sale — skip stock deduction
+            Bulk sale â€” skip stock deduction
           </label>
         </div>
 
@@ -437,13 +425,15 @@ export async function render(container) {
   injectPOSStyles()
 
   let activeCategory = ''
-  let paymentMethod  = 'cash'
-  let sheetPayMethod = 'cash'
+  let paymentMethod  = accounts.find(a=>a.account_type==='till') ? 'cash' : (accounts.find(a=>a.account_type==='bank') ? 'bank_transfer' : 'credit')
+  let posAccountId   = accounts.find(a=>a.account_type==='till')?.id || accounts.find(a=>a.account_type==='bank')?.id || ''
+  let sheetPayMethod = paymentMethod
+  let sheetAccountId = posAccountId
   let discount       = 0
   let sheetDiscount  = 0
   let cartOpen       = false
 
-  // ── Mobile cart sheet visibility ──────────────────────
+  // â”€â”€ Mobile cart sheet visibility â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const trigger       = container.querySelector('#mobile-cart-trigger')
   const cartSheet     = document.getElementById('mobile-cart-sheet') ||
                         container.querySelector('#mobile-cart-sheet')
@@ -486,7 +476,7 @@ export async function render(container) {
     document.body.style.overflow = ''
   }
 
-  // ── Categories ─────────────────────────────────────────
+  // â”€â”€ Categories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function renderCategories() {
     const cats = [...new Set(allItems.map(i => i.category).filter(Boolean))].sort()
     const el   = container.querySelector('#pos-categories')
@@ -507,7 +497,7 @@ export async function render(container) {
     })
   }
 
-  // ── Products ────────────────────────────────────────────
+  // â”€â”€ Products â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function getItemPrice(item) {
     return Number(item.selling_price) > 0 ? Number(item.selling_price) :
            Number(item.unit_cost)     > 0 ? Number(item.unit_cost)     : 0
@@ -567,7 +557,7 @@ export async function render(container) {
 
             <div style="padding:12px 12px 10px">
 
-              <!-- Name — full, wraps to 2 lines max -->
+              <!-- Name â€” full, wraps to 2 lines max -->
               <div style="
                 font-weight:700;font-size:0.875rem;
                 color:${outOfStock ? 'var(--muted)' : 'var(--dark)'};
@@ -587,7 +577,7 @@ export async function render(container) {
                 ">${item.category}</div>
               ` : '<div style="margin-bottom:8px"></div>'}
 
-              <!-- Price — large and prominent -->
+              <!-- Price â€” large and prominent -->
               <div style="
                 font-size:${price > 99999 ? '0.9375rem' : '1.0625rem'};
                 font-weight:800;
@@ -595,7 +585,7 @@ export async function render(container) {
                 letter-spacing:-0.3px;
                 line-height:1;margin-bottom:6px;
               ">
-                ${price > 0 ? fmt(price) : '—'}
+                ${price > 0 ? fmt(price) : ''}
                 ${price > 0 ? '<span style="font-size:0.6875rem;font-weight:600;color:var(--muted);margin-left:2px">ETB</span>' : ''}
               </div>
 
@@ -613,7 +603,7 @@ export async function render(container) {
               </div>
             </div>
 
-            <!-- Add button — bottom right -->
+            <!-- Add button â€” bottom right -->
             <button class="product-add-btn ${inCart?'added':''}" data-id="${item.id}"
               style="
                 position:absolute;bottom:10px;right:10px;
@@ -668,7 +658,7 @@ export async function render(container) {
                   </div>
                 </div>
                 <div class="product-row-price">
-                  ${price > 0 ? fmt(price) + ' ETB' : '—'}
+                  ${price > 0 ? fmt(price) + ' ETB' : ''}
                 </div>
                 <button class="product-row-add ${inCart?'added':''}" data-id="${item.id}">
                   ${inCart ? renderIcon('check',14,'var(--accent)') : renderIcon('plus',14,'#fff')}
@@ -697,7 +687,7 @@ export async function render(container) {
     })
   }
 
-  // ── Cart operations ─────────────────────────────────────
+  // â”€â”€ Cart operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function addToCart(item) {
     const existing  = cart.find(c => c.item.id === item.id)
     const unitPrice = getItemPrice(item)
@@ -723,7 +713,7 @@ export async function render(container) {
     renderProducts()
   }
 
-  // ── Render cart — desktop + mobile sheet ────────────────
+  // â”€â”€ Render cart â€” desktop + mobile sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function renderCart() {
     renderDesktopCart()
     renderMobileSheet()
@@ -793,7 +783,7 @@ export async function render(container) {
               Qty
             </div>
             <div class="qty-control" style="flex-shrink:0">
-              <button class="qty-btn" data-qty-dec="${entry.item.id}">−</button>
+              <button class="qty-btn" data-qty-dec="${entry.item.id}">-</button>
               <input type="number" class="qty-input" value="${entry.qty}"
                 min="0.01" step="0.01" data-qty-input="${entry.item.id}"
                 inputmode="decimal">
@@ -892,7 +882,9 @@ export async function render(container) {
       n.addEventListener('change', () => {
         const entry = cart.find(c => c.item.id === n.dataset.qtyInput)
         if (!entry) return
-        entry.qty = Math.max(0.01, parseFloat(n.value) || 1)
+        const qClean = sanitizeNumericInput(n.value)
+        if (n.value !== qClean) n.value = qClean
+        entry.qty = Math.max(0.01, parseFloat(qClean) || 1)
         n.value = entry.qty
         updateLineTotal(entry.item.id)
         updateDesktopTotals()
@@ -903,7 +895,9 @@ export async function render(container) {
       n.addEventListener('input', () => {
         const entry = cart.find(c => c.item.id === n.dataset.priceInput)
         if (!entry) return
-        entry.price = parseFloat(n.value) || 0
+        const pClean = sanitizeNumericInput(n.value)
+        if (n.value !== pClean) n.value = pClean
+        entry.price = parseFloat(pClean) || 0
         updateLineTotal(entry.item.id)
         updateDesktopTotals()
         const cost   = Number(entry.item.unit_cost) || 0
@@ -947,15 +941,15 @@ export async function render(container) {
         pb.innerHTML = `${renderIcon('alert',13)} Net loss of ${fmt(Math.abs(profit))} ETB (${margin.toFixed(1)}%)`
       } else if (margin < 10) {
         pb.className = 'profit-bar low'
-        pb.innerHTML = `${renderIcon('alert',13)} Low margin: ${margin.toFixed(1)}% — ${fmt(profit)} ETB`
+        pb.innerHTML = `${renderIcon('alert',13)} Low margin: ${margin.toFixed(1)}% â€” ${fmt(profit)} ETB`
       } else {
         pb.className = 'profit-bar ok'
-        pb.innerHTML = `${renderIcon('check',13)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB`
+        pb.innerHTML = `${renderIcon('check',13)} ${margin.toFixed(1)}% margin â€” ${fmt(profit)} ETB`
       }
     }
   }
 
-  // ── Mobile sheet render ──────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Mobile sheet render Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   function renderMobileSheet() {
     const sheetItems    = document.getElementById('sheet-items')
     const sheetCheckout = document.getElementById('sheet-checkout')
@@ -1025,7 +1019,7 @@ export async function render(container) {
                   style="width:32px;height:40px;display:flex;align-items:center;
                     justify-content:center;color:var(--muted);
                     font-size:1.125rem;border:none;background:none;cursor:pointer;
-                    -webkit-tap-highlight-color:transparent;flex-shrink:0">−</button>
+                    -webkit-tap-highlight-color:transparent;flex-shrink:0">-</button>
                 <input type="number"
                   data-sheet-qty="${entry.item.id}"
                   value="${entry.qty}"
@@ -1153,7 +1147,7 @@ export async function render(container) {
       })
     })
 
-    // Price input — no re-render, keyboard stays open
+    // Price input â€” no re-render, keyboard stays open
     document.querySelectorAll('[data-sheet-price]').forEach(inp => {
       inp.addEventListener('input', () => {
         const entry = cart.find(c => c.item.id === inp.dataset.sheetPrice)
@@ -1203,11 +1197,11 @@ export async function render(container) {
       } else if (margin < 10) {
         pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
           font-weight:600;color:#92400E;background:var(--amber-50);padding:6px 8px;
-          border-radius:8px;">${renderIcon('alert',12)} Low margin: ${margin.toFixed(1)}% — ${fmt(profit)} ETB</div>`
+          border-radius:8px;">${renderIcon('alert',12)} Low margin: ${margin.toFixed(1)}% â€” ${fmt(profit)} ETB</div>`
       } else {
         pb.innerHTML = `<div style="display:flex;align-items:center;gap:4px;font-size:0.75rem;
           font-weight:600;color:#15803D;background:var(--green-50);padding:6px 8px;
-          border-radius:8px;">${renderIcon('check',12)} ${margin.toFixed(1)}% margin — ${fmt(profit)} ETB</div>`
+          border-radius:8px;">${renderIcon('check',12)} ${margin.toFixed(1)}% margin â€” ${fmt(profit)} ETB</div>`
       }
     }
   }
@@ -1230,7 +1224,7 @@ export async function render(container) {
     }
   }
 
-  // ── Search ───────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Search Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   container.querySelector('#pos-search').addEventListener('input', e => {
     searchQuery = e.target.value.trim()
     container.querySelector('#pos-search-clear').style.display = searchQuery ? '' : 'none'
@@ -1244,7 +1238,7 @@ export async function render(container) {
     container.querySelector('#pos-search').focus()
   })
 
-  // ── View toggle ──────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ View toggle Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   container.querySelectorAll('.view-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       viewMode = btn.dataset.view
@@ -1254,19 +1248,19 @@ export async function render(container) {
     })
   })
 
-  // ── Discount (desktop) ───────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Discount (desktop) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   container.querySelector('#discount-input')?.addEventListener('input', e => {
     discount = Math.min(100, Math.max(0, parseFloat(e.target.value)||0))
     updateDesktopTotals()
   })
 
-  // ── Discount (mobile sheet) ──────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Discount (mobile sheet) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   document.getElementById('sheet-discount')?.addEventListener('input', e => {
     sheetDiscount = Math.min(100, Math.max(0, parseFloat(e.target.value)||0))
     updateSheetTotals()
   })
 
-  // ── Clear cart ───────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Clear cart Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   container.querySelector('#btn-clear-cart')?.addEventListener('click', () => {
     if (!cart.length) return
     if (!confirm('Clear the entire cart?')) return
@@ -1278,7 +1272,7 @@ export async function render(container) {
     cart = []; renderCart(); renderProducts(); closeCartSheet()
   })
 
-  // ── Payment method (desktop) ─────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Payment method (desktop) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   container.querySelectorAll('.pay-method-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       paymentMethod = btn.dataset.pay
@@ -1289,7 +1283,7 @@ export async function render(container) {
     })
   })
 
-  // ── Payment method (mobile sheet) ────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Payment method (mobile sheet) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   document.querySelectorAll('.sheet-pay-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       sheetPayMethod = btn.dataset.pay
@@ -1304,7 +1298,32 @@ export async function render(container) {
     })
   })
 
-  // ── Sell (desktop) ───────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Sell (desktop) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  function wireTransport(feeId, targaId, placeId, payRowId, yesId, noId) {
+    const get = id => document.querySelector(id)
+    const feeEl = get(feeId), payRow = get(payRowId), tpYes = get(yesId), tpNo = get(noId)
+    if (feeEl) feeEl.addEventListener('input', e => {
+      posTransport.fee = Number(e.target.value) || 0
+      if (payRow) payRow.style.display = posTransport.fee > 0 ? 'block' : 'none'
+    })
+    const tEl = get(targaId)
+    if (tEl) tEl.addEventListener('input', e => { posTransport.targa = e.target.value.toUpperCase() })
+    const pEl = get(placeId)
+    if (pEl) pEl.addEventListener('input', e => { posTransport.place = e.target.value })
+    if (tpYes) tpYes.addEventListener('click', () => {
+      posTransport.paidNow = true
+      tpYes.style.borderColor = 'var(--accent)'; tpYes.style.background = 'var(--teal-50)'; tpYes.style.color = 'var(--accent)'
+      if (tpNo) { tpNo.style.borderColor = 'var(--border)'; tpNo.style.background = 'var(--bg-elevated)'; tpNo.style.color = 'var(--muted)' }
+    })
+    if (tpNo) tpNo.addEventListener('click', () => {
+      posTransport.paidNow = false
+      tpNo.style.borderColor = 'var(--accent)'; tpNo.style.background = 'var(--teal-50)'; tpNo.style.color = 'var(--accent)'
+      if (tpYes) { tpYes.style.borderColor = 'var(--border)'; tpYes.style.background = 'var(--bg-elevated)'; tpYes.style.color = 'var(--muted)' }
+    })
+  }
+  wireTransport('#pos-transport-fee','#pos-transport-targa','#pos-transport-place','#pos-transport-pay-row','#pos-tp-yes','#pos-tp-no')
+  wireTransport('#sheet-transport-fee','#sheet-transport-targa','#sheet-transport-place','#sheet-transport-pay-row','#sheet-tp-yes','#sheet-tp-no')
+
   container.querySelector('#btn-sell')?.addEventListener('click', () => handleSell({
     pmField:       '#pos-checkout .pay-method-btn.active',
     noteField:     '#sale-note',
@@ -1313,22 +1332,23 @@ export async function render(container) {
     creditName:    '#credit-name',
     creditPhone:   '#credit-phone',
     getPayMethod:  () => paymentMethod,
+    getAccountId:  () => posAccountId,
     getDiscount:   () => discount,
   }))
 
-  // ── Sell (mobile sheet) ──────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Sell (mobile sheet) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   document.getElementById('sheet-sell')?.addEventListener('click', () => handleSell({
     noteField:     '#sheet-note',
-    accountField:  '#sheet-account',
     bulkField:     '#sheet-bulk',
     creditName:    '#sheet-credit-name',
     creditPhone:   '#sheet-credit-phone',
     getPayMethod:  () => sheetPayMethod,
+    getAccountId:  () => sheetAccountId,
     getDiscount:   () => sheetDiscount,
     onSuccess:     closeCartSheet,
   }))
 
-  async function handleSell({ noteField, accountField, bulkField, creditName, creditPhone, getPayMethod, getDiscount, onSuccess }) {
+  async function handleSell({ noteField, bulkField, creditName, creditPhone, getPayMethod, getAccountId, getDiscount, onSuccess }) {
     if (!cart.length) { showToast('Add at least one product', 'error'); return }
 
     const pm        = getPayMethod()
@@ -1337,7 +1357,7 @@ export async function render(container) {
     const discAmt   = subtotal * (disc / 100)
     const total     = subtotal - discAmt
     const isBulk    = document.querySelector(bulkField)?.checked
-    const accountId = document.querySelector(accountField)?.value
+    const accountId = getAccountId ? getAccountId() : ''
     const note      = document.querySelector(noteField)?.value?.trim()
     const isCredit  = pm === 'credit'
 
@@ -1347,7 +1367,7 @@ export async function render(container) {
 
     const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost)||0), 0)
     if (total < totalCost) {
-      if (!confirm(`⚠️ This sale results in a loss of ${fmt(totalCost - total)} ETB. Continue?`)) return
+      if (!confirm(`Ã¢Å¡Â Ã¯Â¸Â This sale results in a loss of ${fmt(totalCost - total)} ETB. Continue?`)) return
     }
 
     // Disable sell button
@@ -1363,6 +1383,9 @@ export async function render(container) {
         payment_method:  pm,
         source:          'manual',
         notes:           note || null,
+        transport_fee:   posTransport.fee > 0 ? posTransport.fee : null,
+        targa:           posTransport.targa || null,
+        delivery_place:  posTransport.place || null,
       }).select().single()
 
       if (saleErr) throw saleErr
@@ -1405,6 +1428,38 @@ export async function render(container) {
         })
       }
 
+      if (posTransport.fee > 0) {
+        await supabase.from('transport_fees').insert({
+          store_id:             currentStore?.id,
+          entity_type:          'sale',
+          entity_id:            sale.id,
+          amount:               posTransport.fee,
+          paid_now:             posTransport.paidNow,
+          paid_from_account_id: posTransport.paidNow ? (accountId||null) : null,
+          charge_customer:      false,
+        })
+        if (posTransport.paidNow) {
+          await supabase.from('expenses').insert({
+            store_id:        currentStore?.id,
+            cash_account_id: accountId||null,
+            expense_date:    new Date().toISOString().split('T')[0],
+            amount:          posTransport.fee,
+            category:        'transport_fee',
+            description:     'Transport fee (POS sale)',
+            source:          'manual',
+          })
+        } else {
+          await supabase.from('vendor_debts').insert({
+            store_id:    currentStore?.id,
+            vendor_name: 'Transport Driver',
+            amount_owed: posTransport.fee,
+            amount_paid: 0,
+            status:      'unpaid',
+            notes:       'Transport fee from POS sale',
+          })
+        }
+      }
+
       try {
         await postSaleEntry({ storeId:currentStore?.id, saleId:sale.id, date:new Date().toISOString().split('T')[0], amount:total, isCredit })
       } catch(e) { console.warn('Journal:', e.message) }
@@ -1430,6 +1485,7 @@ export async function render(container) {
         }
       }, 1500) // wait 1.5s so success screen is visible first
 
+      posTransport = { fee: 0, targa: '', place: '', paidNow: true }
       cart = []; renderCart(); renderProducts()
       invalidateAfterSale()
       const fresh = await getInventory()
@@ -1449,7 +1505,8 @@ export async function render(container) {
   function showSaleSuccess(total, itemCount, saleId) {
     const overlay = document.createElement('div')
     overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.4);
-      backdrop-filter:blur(8px);z-index:400;
+      backdrop-filter:blur(8px);
+      z-index:400;
       display:flex;align-items:center;justify-content:center;padding:1rem;`
     overlay.innerHTML = `
       <div style="background:var(--bg-elevated);border-radius:24px;padding:2.5rem 2rem;
@@ -1473,9 +1530,10 @@ export async function render(container) {
             justify-content:center;gap:0.5rem;" id="btn-view-receipt">
             ${renderIcon('reports', 16)} Receipt & Share
           </button>
-          <button style="width:100%;padding:0.75rem;background:var(--accent);color:#fff;
-            border-radius:14px;font-weight:600;cursor:pointer;border:none;"
-            id="success-close">New Sale</button>
+          <button class="btn btn-primary" id="success-close" style="width:100%;padding:0.75rem;
+            background:var(--accent);color:#fff;border-radius:14px;font-weight:600;cursor:pointer;border:none;">
+            New Sale
+          </button>
         </div>
       </div>
     `
@@ -1485,138 +1543,170 @@ export async function render(container) {
     setTimeout(() => { if (document.body.contains(overlay)) overlay.remove() }, 6000)
   }
 
-  function updateAccountDropdowns() {
-    const update = (method, selectId, sectionId, numberLabelId) => {
-      let select = document.getElementById(selectId) || container.querySelector('#' + selectId)
-      const section = document.getElementById(sectionId) || container.querySelector('#' + sectionId)
-      const numberLabel = document.getElementById(numberLabelId)
-      
-      if (!select) {
-        console.warn('POS: Select element not found:', selectId)
-        return
-      }
-      
-      // Always show account section for all payment methods
-      if (section) {
-        section.style.display = 'block'
-      }
-      
-      // Update label for Telebirr
-      if (numberLabel) {
-        numberLabel.textContent = method === 'telebirr' ? 'Phone Number' : 'Account Number'
-      }
-      
-      // Filter accounts based on payment method
-      let filtered = accounts
-      if (method === 'cash') {
-        // For cash payments, show till/cash accounts
-        filtered = accounts.filter(a => a.account_type === 'till')
-      } else if (method === 'bank_transfer' || method === 'telebirr' || method === 'cbe_birr') {
-        // For bank/digital payments, show bank accounts
-        filtered = accounts.filter(a => a.account_type === 'bank')
-      }
-      // For credit/other, show all accounts
-      // If no accounts match the filter, show all accounts as fallback
-      if (filtered.length === 0) filtered = accounts
-      
-      console.log(`POS: Updating ${selectId} for ${method}, total accounts: ${accounts.length}, filtered: ${filtered.length}`, filtered)
-      
-      const prev = select.value
-      const optionsHTML = filtered.map(a => `<option value="${a.id}">${a.account_name}</option>`).join('') +
-        `<option value="__new__" style="color:var(--accent);font-weight:600">+ Create New Account</option>`
-      
-      select.innerHTML = optionsHTML
-      if (filtered.some(a => a.id === prev)) select.value = prev
-      
-      // Remove old listener by cloning and replace
-      const newSelect = select.cloneNode(true)
-      select.parentNode.replaceChild(newSelect, select)
-      
-      // Update reference to the new select element
-      select = newSelect
-      
-      // Add change listener for create new
-      select.addEventListener('change', () => {
-        const formId = selectId.includes('sheet') ? 'sheet-new-account-form' : 'new-pos-account-form'
-        const form = document.getElementById(formId) || container.querySelector('#' + formId)
-        console.log(`POS: Account changed to ${select.value}, showing form:`, select.value === '__new__')
-        if (form) {
-          form.style.display = select.value === '__new__' ? 'block' : 'none'
-        }
-      })
-    }
-    update(paymentMethod, 'sale-account', 'account-section', 'pos-acc-number-label')
-    update(sheetPayMethod, 'sheet-account', 'sheet-account-section', 'sheet-acc-number-label')
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Smart payment UI Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  function renderPOSPaymentUI(prefix) {
+    const isSheet  = prefix === 'sheet'
+    const pm       = isSheet ? sheetPayMethod : paymentMethod
+    const accId    = isSheet ? sheetAccountId : posAccountId
+    const tills    = accounts.filter(a => a.account_type === 'till')
+    const banks    = accounts.filter(a => a.account_type === 'bank')
+    return `
+      <div style="display:flex;gap:0.375rem;flex-wrap:wrap;margin-bottom:0.375rem">
+        ${['cash','credit'].map(p => `
+          <button data-pay="${p}" class="${prefix}-pay-btn" style="
+            padding:0.3rem 0.875rem;border-radius:var(--radius-pill);
+            font-size:0.8125rem;font-weight:600;cursor:pointer;
+            border:1.5px solid ${pm===p?'var(--accent)':'var(--border)'};
+            background:${pm===p?'var(--teal-50)':'var(--bg-elevated)'};
+            color:${pm===p?'var(--accent)':'var(--muted)'};
+          ">${p==='cash'?'Cash':'Credit'}</button>
+        `).join('')}
+      </div>
+      ${pm === 'cash' ? `
+        <div style="margin-bottom:0.375rem;padding:0.5rem 0.625rem;
+          background:var(--bg-subtle);border-radius:10px;border:1px solid var(--border);">
+          <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.25rem">Cash Account</div>
+          <div style="display:flex;gap:0.375rem;flex-wrap:wrap">
+            ${tills.length
+              ? tills.map(a => `<button data-till="${a.id}" class="${prefix}-till-btn" style="
+                  padding:0.25rem 0.625rem;border-radius:var(--radius-pill);
+                  font-size:0.8125rem;font-weight:600;cursor:pointer;
+                  border:1.5px solid ${accId===a.id?'var(--accent)':'var(--border)'};
+                  background:${accId===a.id?'var(--teal-50)':'var(--bg-elevated)'};
+                  color:${accId===a.id?'var(--accent)':'var(--muted)'};
+                ">${a.account_name}</button>`).join('')
+              : '<span style="font-size:0.8125rem;color:var(--muted)">No till accounts</span>'
+            }
+          </div>
+        </div>
+      ` : ''}
+      <div style="display:flex;gap:0.375rem;flex-wrap:wrap;align-items:center">
+        ${banks.map(a => `<button data-bank="${a.id}" class="${prefix}-bank-btn" style="
+          padding:0.3rem 0.875rem;border-radius:var(--radius-pill);
+          font-size:0.8125rem;font-weight:600;cursor:pointer;
+          border:1.5px solid ${pm==='bank_transfer'&&accId===a.id?'var(--accent)':'var(--border)'};
+          background:${pm==='bank_transfer'&&accId===a.id?'var(--teal-50)':'var(--bg-elevated)'};
+          color:${pm==='bank_transfer'&&accId===a.id?'var(--accent)':'var(--muted)'};
+        ">${a.bank_name||a.account_name}</button>`).join('')}
+        <button id="${prefix}-add-bank-btn" style="
+          width:26px;height:26px;border-radius:50%;
+          background:var(--bg-subtle);color:var(--muted);
+          display:flex;align-items:center;justify-content:center;
+          border:1px solid var(--border);cursor:pointer;font-size:1rem;font-weight:700;flex-shrink:0;
+        " title="Add bank account">+</button>
+      </div>
+    `
   }
 
-  // Account creation handlers
-  async function createPOSAccount(prefix) {
-    const nameInput = document.getElementById(`${prefix}-new-acc-name`)
-    const numberInput = document.getElementById(`${prefix}-new-acc-number`)
-    const typeInput = document.getElementById(`${prefix}-new-acc-type`)
-    const balanceInput = document.getElementById(`${prefix}-new-acc-balance`)
-    const calculateInput = document.getElementById(`${prefix}-new-acc-calculate`)
-    
-    const name = nameInput?.value?.trim()
-    if (!name) { alert('Account name is required'); return }
+  function injectPaymentUI(prefix) {
+    const isSheet = prefix === 'sheet'
+    const section = isSheet
+      ? document.getElementById('sheet-payment-section')
+      : container.querySelector('#pos-payment-section')
+    if (!section) return
+    section.innerHTML = renderPOSPaymentUI(prefix)
 
-    const accountNumber = numberInput?.value?.trim() || null
-    const accountType = typeInput?.value || 'bank'
-    const balance = Number(balanceInput?.value) || 0
-    const autoCalculate = calculateInput?.checked || false
+    section.querySelectorAll(`.${prefix}-pay-btn`).forEach(b => b.addEventListener('click', () => {
+      const p = b.dataset.pay
+      if (isSheet) {
+        sheetPayMethod = p
+        if (p === 'cash') sheetAccountId = accounts.find(a => a.account_type==='till')?.id || ''
+        else if (p === 'credit') sheetAccountId = ''
+        const cf = document.getElementById('sheet-credit-fields')
+        if (cf) cf.style.display = p==='credit' ? 'block' : 'none'
+      } else {
+        paymentMethod = p
+        if (p === 'cash') posAccountId = accounts.find(a => a.account_type==='till')?.id || ''
+        else if (p === 'credit') posAccountId = ''
+        const cf = container.querySelector('#credit-fields')
+        const oc = container.querySelector('#optional-customer')
+        if (cf) cf.style.display = p==='credit' ? 'block' : 'none'
+        if (oc) oc.style.display = p==='credit' ? 'none'  : 'block'
+      }
+      injectPaymentUI(prefix)
+    }))
 
-    const { data: newAccount, error } = await supabase.from('cash_accounts').insert({
-      store_id: currentStore?.id,
-      account_name: name,
-      account_number: accountNumber,
-      account_type: accountType,
-      balance: autoCalculate ? 0 : balance,
-    }).select().single()
+    section.querySelectorAll(`.${prefix}-till-btn`).forEach(b => b.addEventListener('click', () => {
+      if (isSheet) sheetAccountId = b.dataset.till
+      else posAccountId = b.dataset.till
+      injectPaymentUI(prefix)
+    }))
 
-    if (error) { alert('Error creating account'); console.error(error); return }
+    section.querySelectorAll(`.${prefix}-bank-btn`).forEach(b => b.addEventListener('click', () => {
+      if (isSheet) { sheetPayMethod = 'bank_transfer'; sheetAccountId = b.dataset.bank }
+      else { paymentMethod = 'bank_transfer'; posAccountId = b.dataset.bank }
+      injectPaymentUI(prefix)
+    }))
 
-    accounts.push(newAccount)
-    const selectId = prefix === 'pos' ? 'sale-account' : 'sheet-account'
-    const select = document.getElementById(selectId)
-    if (select) select.value = newAccount.id
-    
-    const formId = `${prefix}-new-account-form`
-    const form = document.getElementById(formId)
-    if (form) form.style.display = 'none'
-    
-    if (nameInput) nameInput.value = ''
-    if (numberInput) numberInput.value = ''
-    if (balanceInput) balanceInput.value = ''
-    if (calculateInput) calculateInput.checked = false
-    
-    updateAccountDropdowns()
+    section.querySelector(`#${prefix}-add-bank-btn`)?.addEventListener('click', () => openPOSAddBankModal(prefix))
   }
 
-  // Desktop account creation
-  container.querySelector('#pos-save-new-account')?.addEventListener('click', () => createPOSAccount('pos'))
-  container.querySelector('#pos-cancel-new-account')?.addEventListener('click', () => {
-    const form = container.querySelector('#new-pos-account-form')
-    if (form) form.style.display = 'none'
-    const select = container.querySelector('#sale-account')
-    if (select) select.value = ''
-  })
+  async function openPOSAddBankModal(prefix) {
+    const ov = document.createElement('div')
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:500;padding:1rem;'
+    const bm = document.createElement('div')
+    bm.style.cssText = 'background:var(--bg-elevated);border-radius:16px;width:100%;max-width:400px;box-shadow:var(--shadow-lg);border:1px solid var(--border);overflow:hidden;'
+    bm.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;background:var(--dark);">
+        <div style="font-weight:700;color:#fff;font-size:0.9375rem">Add Bank Account</div>
+        <button id="bm-close" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);cursor:pointer;border:none;">${renderIcon('close',14)}</button>
+      </div>
+      <div style="padding:1.25rem;display:flex;flex-direction:column;gap:0.875rem">
+        <div><label class="form-label">Account Name *</label><input class="form-input" id="bm-name" placeholder="e.g. CBE Account"></div>
+        <div><label class="form-label">Type</label>
+          <select class="form-input" id="bm-type">
+            <option value="till">ðŸª Till (Cash in store)</option>
+            <option value="bank">ðŸ¦ Bank Account</option>
+          </select>
+        </div>
+        <div id="bm-bank-fields" style="display:none;flex-direction:column;gap:0.625rem">
+          <div><label class="form-label">Bank Name</label><input class="form-input" id="bm-bank-name" placeholder="e.g. Commercial Bank of Ethiopia"></div>
+          <div><label class="form-label">Account Number</label><input class="form-input" id="bm-acc-num" placeholder="e.g. 1000123456789"></div>
+        </div>
+        <div><label class="form-label">Opening Balance (ETB)</label><input class="form-input" type="number" id="bm-balance" value="0" min="0" step="0.01" inputmode="decimal"></div>
+        <div style="display:flex;gap:0.625rem;margin-top:0.25rem">
+          <button class="btn btn-outline" id="bm-cancel" style="flex:1;justify-content:center">Cancel</button>
+          <button class="btn btn-primary" id="bm-save" style="flex:2;justify-content:center">Save Account</button>
+        </div>
+      </div>`
+    ov.appendChild(bm); document.body.appendChild(ov)
+    const close = () => ov.remove()
+    bm.querySelector('#bm-close').addEventListener('click', close)
+    bm.querySelector('#bm-cancel').addEventListener('click', close)
+    ov.addEventListener('click', e => { if (e.target===ov) close() })
+    const typeSelect = bm.querySelector('#bm-type')
+    const bankFields = bm.querySelector('#bm-bank-fields')
+    typeSelect.addEventListener('change', () => { bankFields.style.display = typeSelect.value==='bank' ? 'flex' : 'none' })
+    bm.querySelector('#bm-save').addEventListener('click', async () => {
+      const name = bm.querySelector('#bm-name').value.trim()
+      if (!name) { showToast('Account name is required','error'); return }
+      const type = typeSelect.value
+      const saveBtn = bm.querySelector('#bm-save')
+      saveBtn.textContent = 'Saving...'; saveBtn.disabled = true
+      const { data: na, error } = await supabase.from('cash_accounts').insert({
+        store_id: currentStore?.id, account_name: name, account_type: type,
+        balance: Number(bm.querySelector('#bm-balance').value)||0,
+        bank_name: type==='bank' ? (bm.querySelector('#bm-bank-name').value.trim()||null) : null,
+        account_number: type==='bank' ? (bm.querySelector('#bm-acc-num').value.trim()||null) : null,
+      }).select('id,account_name,account_type,bank_name').single()
+      if (error) { showToast('Failed: '+error.message,'error'); saveBtn.textContent='Save Account'; saveBtn.disabled=false; return }
+      accounts.push(na)
+      if (prefix==='sheet') { sheetPayMethod = na.account_type==='bank'?'bank_transfer':'cash'; sheetAccountId = na.id }
+      else { paymentMethod = na.account_type==='bank'?'bank_transfer':'cash'; posAccountId = na.id }
+      showToast('Account created','success'); close(); injectPaymentUI(prefix)
+    })
+  }
 
-  // Mobile sheet account creation
-  document.getElementById('sheet-save-new-account')?.addEventListener('click', () => createPOSAccount('sheet'))
-  document.getElementById('sheet-cancel-new-account')?.addEventListener('click', () => {
-    const form = document.getElementById('sheet-new-account-form')
-    if (form) form.style.display = 'none'
-    const select = document.getElementById('sheet-account')
-    if (select) select.value = ''
-  })
+  injectPaymentUI('pos')
+  injectPaymentUI('sheet')
 
   renderCategories()
   renderProducts()
   renderCart()
-  updateAccountDropdowns()
 }
 
-// ── Helpers ──────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const PAY_LABELS = {
   cash:'Cash', bank_transfer:'Bank', telebirr:'Telebirr',
   cbe_birr:'CBE Birr', credit:'Credit', other:'Other',
@@ -1652,7 +1742,7 @@ function injectPOSStyles() {
       display: grid;
       grid-template-columns: 1fr 420px;
       gap: 1.25rem;
-      /* No fixed height — use min-height so it can grow */
+      /* No fixed height â€” use min-height so it can grow */
       min-height: calc(100vh - 6rem);
       align-items: start;
     }
@@ -1726,7 +1816,7 @@ function injectPOSStyles() {
       overflow-y: auto;
       overflow-x: hidden;
       padding: 0.75rem;
-      /* No flex:1 — let content determine height */
+      /* No flex:1 â€” let content determine height */
     }
     .cart-empty { display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:160px;padding:2rem; }
     .cart-item { background:var(--bg-subtle);border-radius:var(--radius-lg);padding:0.75rem;margin-bottom:0.625rem;border:1px solid var(--border); }

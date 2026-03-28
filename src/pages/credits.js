@@ -254,7 +254,7 @@ export async function render(container) {
   async function renderPayable(el, storeIds) {
     const { data: debts } = await supabase
       .from('vendor_debts')
-      .select('*')
+      .select('*, vendor_purchases(*)')
       .in('store_id', storeIds)
       .order('created_at', { ascending: false })
 
@@ -360,11 +360,30 @@ export async function render(container) {
   function renderDebtRows(debts) {
     if (!debts.length) return `<tr><td colspan="7"><div class="empty"><div class="empty-text">No vendor debts</div></div></td></tr>`
     return debts.map(d => {
-      const remaining = Number(d.amount_owed) - Number(d.amount_paid)
-      const pct       = Math.round((Number(d.amount_paid) / Number(d.amount_owed)) * 100)
+      const remaining  = Number(d.amount_owed) - Number(d.amount_paid)
+      const pct        = d.amount_owed > 0 ? Math.round((Number(d.amount_paid) / Number(d.amount_owed)) * 100) : 0
+      const purchases  = d.vendor_purchases || []
+      const productsRow = purchases.length ? `
+        <tr>
+          <td colspan="7" style="padding:0;border-top:none">
+            <div style="padding:0.375rem 1rem 0.625rem 1.5rem;background:var(--bg-subtle);border-bottom:1px solid var(--border)">
+              <div style="font-size:0.6875rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.3rem">Products</div>
+              <div style="display:flex;flex-wrap:wrap;gap:0.3rem">
+                ${purchases.map(p => `
+                  <span style="font-size:0.8125rem;padding:0.2rem 0.625rem;
+                    background:var(--bg-elevated);border:1px solid var(--border);
+                    border-radius:var(--radius-pill);white-space:nowrap">
+                    ${p.product_name} &times; ${p.quantity} &bull; ${fmt(p.unit_cost)} ETB each
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+          </td>
+        </tr>
+      ` : ''
       return `
         <tr>
-          <td><div style="font-weight:600">${d.vendor_name}</div></td>
+          <td><div style="font-weight:600">${d.vendor_name}</div>${d.notes ? `<div style="font-size:0.75rem;color:var(--muted)">${d.notes}</div>` : ''}</td>
           <td>${new Date(d.created_at).toLocaleDateString()}</td>
           <td>${fmt(d.amount_owed)} ETB</td>
           <td>
@@ -374,7 +393,7 @@ export async function render(container) {
             </div>
           </td>
           <td style="font-weight:700;color:${remaining > 0 ? 'var(--danger)' : 'var(--accent)'}">
-            ${remaining > 0 ? fmt(remaining) + ' ETB' : '✓ Paid'}
+            ${remaining > 0 ? fmt(remaining) + ' ETB' : '&#10003; Paid'}
           </td>
           <td>
             <span class="badge ${d.status==='paid' ? 'badge-green' : d.status==='partial' ? 'badge-yellow' : 'badge-red'}">
@@ -391,6 +410,7 @@ export async function render(container) {
             </div>
           </td>
         </tr>
+        ${productsRow}
       `
     }).join('')
   }
@@ -512,7 +532,8 @@ export async function render(container) {
         <tr>
           <td>
             <div style="font-weight:600">${c.name}</div>
-            ${c.plate_number ? `<div style="font-size:0.75rem;color:var(--muted);font-family:monospace;margin-top:2px">🚗 ${c.plate_number}</div>` : ''}
+            ${(c.last_targa || c.plate_number) ? `<div style="font-size:0.75rem;color:var(--muted);font-family:monospace;margin-top:2px">🚗 ${c.last_targa || c.plate_number}</div>` : ''}
+            ${c.default_place ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:1px">📍 ${c.default_place}</div>` : ''}
           </td>
           <td style="color:var(--muted)">${c.phone || '—'}</td>
           <td>${fmt(totalCredit)} ETB</td>
@@ -822,6 +843,36 @@ export async function render(container) {
           leftToApply -= applying
         }
 
+        // ── Transport fee recovery (proportional) ────────────────────
+        try {
+          const { data: pendingTfs } = await supabase.from('transport_fees')
+            .select('*').in('credit_sale_id', creditIds)
+            .eq('charge_customer', true).eq('fully_recovered', false)
+          for (const tf of (pendingTfs || [])) {
+            if (!tf.credit_sale_id) continue
+            const { data: cs } = await supabase.from('credit_sales')
+              .select('amount_owed, amount_paid, transport_fee, transport_recovered').eq('id', tf.credit_sale_id).single()
+            if (!cs || !Number(cs.transport_fee)) continue
+            const appliedToThis = Math.min(amount, Number(cs.amount_owed)) // payment applied to this sale
+            const recoverRatio = Number(cs.amount_owed) > 0 ? appliedToThis / Number(cs.amount_owed) : 0
+            const toRecover = Math.min(
+              Number(tf.amount) - Number(tf.recovered_amount),
+              Number(tf.amount) * recoverRatio
+            )
+            if (toRecover <= 0.001) continue
+            const newRecovered = Number(tf.recovered_amount) + toRecover
+            const fullyRecovered = newRecovered >= Number(tf.amount) - 0.01
+            await supabase.from('transport_fees').update({
+              recovered_amount: newRecovered,
+              fully_recovered:  fullyRecovered,
+              ...(fullyRecovered ? { recovered_at: new Date().toISOString() } : {}),
+            }).eq('id', tf.id)
+            await supabase.from('credit_sales').update({
+              transport_recovered: Number(cs.transport_recovered || 0) + toRecover,
+            }).eq('id', tf.credit_sale_id)
+          }
+        } catch(tfErr) { console.warn('Transport recovery failed:', tfErr.message) }
+
         // Credit cash account (money coming IN)
         if (account) {
           const { data: acc } = await supabase.from('cash_accounts').select('balance').eq('id', account).single()
@@ -872,62 +923,86 @@ export async function render(container) {
     })
   }
 
-  // ── Customer history modal ────────────────────────────────
+  // ── Customer history modal ──────────────────────────────
   async function openCustomerHistory(customerId, customerName) {
-    const { data: credits } = await supabase
-      .from('credit_sales')
-      .select('*, sales(sale_date, total_amount, payment_method)')
-      .eq('customer_id', customerId)
-      .order('created_at', { ascending: false })
+    const [{ data: credits }, { data: custData }, { data: tfs }] = await Promise.all([
+      supabase.from('credit_sales')
+        .select('*, sales(sale_date, total_amount, payment_method)')
+        .eq('customer_id', customerId).order('created_at', { ascending: false }),
+      supabase.from('customers').select('last_targa, default_place, phone, plate_number').eq('id', customerId).single(),
+      supabase.from('transport_fees').select('*').eq('charge_customer', true)
+        .in('credit_sale_id', (await supabase.from('credit_sales').select('id').eq('customer_id', customerId)).data?.map(c => c.id) || []),
+    ])
 
     const histOverlay = document.createElement('div')
     histOverlay.className = 'modal-overlay'
     histOverlay.style.display = 'flex'
 
-    const totalOwed    = (credits||[]).reduce((s,c) => s + Number(c.amount_owed), 0)
-    const totalPaid    = (credits||[]).reduce((s,c) => s + Number(c.amount_paid), 0)
-    const outstanding  = totalOwed - totalPaid
+    const totalOwed        = (credits||[]).reduce((s,c) => s + Number(c.amount_owed), 0)
+    const totalPaid        = (credits||[]).reduce((s,c) => s + Number(c.amount_paid), 0)
+    const outstanding      = totalOwed - totalPaid
+    const totalTransport   = (tfs||[]).reduce((s,t) => s + Number(t.amount), 0)
+    const recoveredTransport = (tfs||[]).reduce((s,t) => s + Number(t.recovered_amount), 0)
+    const pendingTransport = totalTransport - recoveredTransport
 
     histOverlay.innerHTML = `
-      <div class="modal" style="max-width:560px">
+      <div class="modal" style="max-width:580px">
         <div class="modal-header">
           <div class="modal-title">📒 ${customerName || 'Customer'} — Credit History</div>
           <button class="modal-close" id="hist-close">✕</button>
         </div>
 
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1rem">
-          <div style="text-align:center;padding:0.75rem;background:var(--bg-light);border-radius:var(--radius)">
+        ${(custData?.last_targa || custData?.default_place) ? `
+          <div style="display:flex;gap:1rem;flex-wrap:wrap;padding:0.625rem 0.875rem;background:var(--bg-subtle);border-radius:10px;margin-bottom:1rem;font-size:0.8125rem">
+            ${custData.last_targa ? `<span>🚗 <b style="font-family:monospace">${custData.last_targa}</b></span>` : ''}
+            ${custData.default_place ? `<span>📍 ${custData.default_place}</span>` : ''}
+          </div>
+        ` : ''}
+
+        <div style="display:grid;grid-template-columns:repeat(${pendingTransport > 0 ? 4 : 3},1fr);gap:0.625rem;margin-bottom:1rem">
+          <div style="text-align:center;padding:0.625rem;background:var(--bg-light);border-radius:var(--radius)">
             <div style="font-size:11px;color:var(--muted)">TOTAL SALES</div>
-            <div style="font-weight:700;font-size:1.1rem">${fmt(totalOwed)}</div>
+            <div style="font-weight:700;font-size:1rem">${fmt(totalOwed)}</div>
           </div>
-          <div style="text-align:center;padding:0.75rem;background:var(--bg-light);border-radius:var(--radius)">
+          <div style="text-align:center;padding:0.625rem;background:var(--bg-light);border-radius:var(--radius)">
             <div style="font-size:11px;color:var(--muted)">PAID</div>
-            <div style="font-weight:700;font-size:1.1rem;color:var(--accent)">${fmt(totalPaid)}</div>
+            <div style="font-weight:700;font-size:1rem;color:var(--accent)">${fmt(totalPaid)}</div>
           </div>
-          <div style="text-align:center;padding:0.75rem;background:var(--bg-light);border-radius:var(--radius)">
+          <div style="text-align:center;padding:0.625rem;background:var(--bg-light);border-radius:var(--radius)">
             <div style="font-size:11px;color:var(--muted)">OUTSTANDING</div>
-            <div style="font-weight:700;font-size:1.1rem;color:${outstanding > 0 ? 'var(--warning)' : 'var(--accent)'}">
+            <div style="font-weight:700;font-size:1rem;color:${outstanding > 0 ? 'var(--warning)' : 'var(--accent)'}">
               ${outstanding > 0 ? fmt(outstanding) : '✓ Clear'}
             </div>
           </div>
+          ${pendingTransport > 0 ? `
+            <div style="text-align:center;padding:0.625rem;background:#FFFBEB;border:1px solid #FCD34D;border-radius:var(--radius)">
+              <div style="font-size:11px;color:#92400E">🚚 TRANSPORT</div>
+              <div style="font-weight:700;font-size:1rem;color:#92400E">${fmt(pendingTransport)}</div>
+            </div>
+          ` : ''}
         </div>
 
-        <div style="max-height:320px;overflow-y:auto">
+        <div style="max-height:340px;overflow-y:auto">
           ${(credits||[]).map(c => {
             const remaining = Number(c.amount_owed) - Number(c.amount_paid)
+            const tf = (tfs||[]).find(t => t.credit_sale_id === c.id)
+            const tfPending = tf ? Number(tf.amount) - Number(tf.recovered_amount) : 0
             return `
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0;border-bottom:1px solid var(--border)">
-                <div>
-                  <div style="font-weight:500;font-size:13.5px">${c.sales?.sale_date || '—'}</div>
-                  <div style="font-size:11.5px;color:var(--muted)">
-                    Sale: ${fmt(c.amount_owed)} ETB · Paid: ${fmt(c.amount_paid)} ETB
+              <div style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                  <div>
+                    <div style="font-weight:500;font-size:13.5px">${c.sales?.sale_date || '—'}</div>
+                    <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+                      Sale: ${fmt(c.amount_owed)} ETB · Paid: ${fmt(c.amount_paid)} ETB
+                    </div>
+                    ${tf ? `<div style="font-size:11.5px;color:#92400E;margin-top:2px">🚚 Transport: ${fmt(tf.amount)} ETB${tfPending > 0 ? ' — <b>'+fmt(tfPending)+' pending recovery</b>' : ' — ✓ recovered'}</div>` : ''}
                   </div>
-                </div>
-                <div style="text-align:right">
-                  <span class="badge ${c.status==='paid'?'badge-green':c.status==='partial'?'badge-yellow':'badge-red'}">
-                    ${c.status}
-                  </span>
-                  ${remaining > 0 ? `<div style="font-size:11.5px;color:var(--warning);margin-top:2px">${fmt(remaining)} ETB left</div>` : ''}
+                  <div style="text-align:right">
+                    <span class="badge ${c.status==='paid'?'badge-green':c.status==='partial'?'badge-yellow':'badge-red'}">
+                      ${c.status}
+                    </span>
+                    ${remaining > 0 ? `<div style="font-size:11.5px;color:var(--warning);margin-top:2px">${fmt(remaining)} ETB left</div>` : ''}
+                  </div>
                 </div>
               </div>
             `
