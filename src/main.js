@@ -149,6 +149,12 @@ export async function loadPage(pageName) {
         requestAnimationFrame(() => {
           contentEl.style.opacity   = '1'
           contentEl.style.transform = 'translateY(0)'
+          setTimeout(() => {
+            if (contentEl && document.body.contains(contentEl)) {
+              contentEl.style.transform = ''
+              contentEl.style.transition = ''
+            }
+          }, 220)
         })
       }
     }

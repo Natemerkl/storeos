@@ -20,6 +20,17 @@ let getContentEl = null;
 let onNavigate = null;
 
 export function pushRoute(path) {
+  // Detect back navigation — move index instead of pushing a duplicate
+  if (historyIndex > 0 && historyStack[historyIndex - 1] === path) {
+    historyIndex--;
+    return;
+  }
+  // Detect forward navigation — move index instead of pushing a duplicate
+  if (historyIndex < historyStack.length - 1 && historyStack[historyIndex + 1] === path) {
+    historyIndex++;
+    return;
+  }
+  // Normal new navigation — slice forward history and push
   historyStack.length = historyIndex + 1;
   historyStack.push(path);
   historyIndex = historyStack.length - 1;
@@ -97,7 +108,11 @@ function cleanupGesture() {
   indicatorEl.style.transform = 'translateY(-50%) scale(0.6)';
   setTimeout(() => {
     const contentEl = getContentEl();
-    if (contentEl) contentEl.style.willChange = '';
+    if (contentEl) {
+      contentEl.style.willChange = '';
+      contentEl.style.transform = '';
+      contentEl.style.transition = '';
+    }
   }, 350);
 }
 
@@ -204,6 +219,13 @@ function onTouchEnd(e) {
           requestAnimationFrame(() => {
             newEl.style.transform = 'translateX(0)';
             newEl.style.opacity = '1';
+            setTimeout(() => {
+              const latestEl = getContentEl();
+              if (latestEl) {
+                latestEl.style.transform = '';
+                latestEl.style.transition = '';
+              }
+            }, 300);
           });
         }
       }, 50);
