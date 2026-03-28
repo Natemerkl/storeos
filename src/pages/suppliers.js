@@ -290,7 +290,7 @@ export async function render(container) {
       return paymentVendor?.vendor_name === vendorName
     })
     
-    // Fetch full stock movements with inventory details
+    // Fetch full stock movements with inventory details - match by supplier name in inventory_items
     const { data: stockMovementsWithDetails } = await supabase
       .from('stock_movements')
       .select(`
@@ -306,7 +306,9 @@ export async function render(container) {
           extra_fields
         )
       `)
-      .in('reference_id', debts.map(d => d.id))
+      .eq('inventory_items.supplier', vendorName)
+      .eq('store_id', currentStore?.id)
+      .order('created_at', { ascending: false })
 
     // Fetch payments with cash account details
     const { data: paymentsWithAccounts } = await supabase
@@ -403,10 +405,10 @@ export async function render(container) {
           Vendor Debts (${debts.length})
         </button>
         <button class="detail-tab-btn" data-tab="payments" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
-          Payment History (${payments.length})
+          Payment History (${enrichedPayments.length})
         </button>
         <button class="detail-tab-btn" data-tab="credit" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
-          Credit Purchases (${creditPurchases.length})
+          Stock Movements (${creditPurchases.length})
         </button>
       </div>
 
@@ -541,7 +543,7 @@ export async function render(container) {
   }
 
   function renderCreditPurchasesTab(creditPurchases) {
-    if (!creditPurchases.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No credit purchases found</div>'
+    if (!creditPurchases.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No stock movements found</div>'
 
     return creditPurchases.map(purchase => {
       const item = purchase.inventory_items
@@ -552,7 +554,7 @@ export async function render(container) {
         <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
           <div style="padding:1rem">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
-              <div style="font-weight:600;color:var(--dark)">📦 Stock Purchase</div>
+              <div style="font-weight:600;color:var(--dark)">📦 Stock Movement</div>
               <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">${fmt(totalValue)} ETB</div>
             </div>
             
