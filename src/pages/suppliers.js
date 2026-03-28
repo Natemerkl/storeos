@@ -290,6 +290,14 @@ export async function render(container) {
       return paymentVendor?.vendor_name === vendorName
     })
     
+    // Fetch inventory items from this supplier
+    const { data: supplierItems } = await supabase
+      .from('inventory_items')
+      .select('*')
+      .eq('supplier', vendorName)
+      .eq('store_id', currentStore?.id)
+      .order('created_at', { ascending: false })
+
     // Fetch full stock movements with inventory details - match by supplier name in inventory_items
     const { data: stockMovementsWithDetails } = await supabase
       .from('stock_movements')
@@ -327,10 +335,12 @@ export async function render(container) {
 
     const creditPurchases = stockMovementsWithDetails || []
     const enrichedPayments = paymentsWithAccounts || []
+    const supplierProducts = supplierItems || []
 
     const outstanding = debts.reduce((s, d) => s + (Number(d.amount_owed) - Number(d.amount_paid)), 0)
     const totalPurchased = creditPurchases.reduce((s, p) => s + (Number(p.quantity) * Number(p.unit_cost || 0)), 0)
     const totalPaid = enrichedPayments.reduce((s, p) => s + Number(p.payment_amount), 0)
+    const totalInventoryValue = supplierProducts.reduce((s, item) => s + (Number(item.quantity) * Number(item.unit_cost || 0)), 0)
     const aging = calculateAgingBreakdown(debts)
 
     // Find last activity date
@@ -364,16 +374,16 @@ export async function render(container) {
             <div style="font-size:1.5rem;font-weight:700;color:var(--danger)">${fmt(outstanding)} ETB</div>
           </div>
           <div>
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Total Purchased</div>
-            <div style="font-size:1.5rem;font-weight:700;color:var(--dark)">${fmt(totalPurchased)} ETB</div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Inventory Value</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--dark)">${fmt(totalInventoryValue)} ETB</div>
           </div>
           <div>
             <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Total Paid</div>
             <div style="font-size:1.5rem;font-weight:700;color:var(--accent)">${fmt(totalPaid)} ETB</div>
           </div>
           <div>
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Last Activity</div>
-            <div style="font-size:1.1rem;font-weight:700;color:var(--dark)">${lastActivity ? lastActivity.toLocaleDateString() : '—'}</div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Products</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--dark)">${supplierProducts.length}</div>
           </div>
         </div>
       </div>
@@ -407,7 +417,10 @@ export async function render(container) {
         <button class="detail-tab-btn" data-tab="payments" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
           Payment History (${enrichedPayments.length})
         </button>
-        <button class="detail-tab-btn" data-tab="credit" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
+        <button class="detail-tab-btn" data-tab="products" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
+          Products (${supplierProducts.length})
+        </button>
+        <button class="detail-tab-btn" data-tab="movements" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
           Stock Movements (${creditPurchases.length})
         </button>
       </div>
@@ -434,7 +447,8 @@ export async function render(container) {
         const tab = btn.dataset.tab
         if (tab === 'debts') tabContent.innerHTML = renderDebtsTab(debts)
         if (tab === 'payments') tabContent.innerHTML = renderPaymentsTab(enrichedPayments)
-        if (tab === 'credit') tabContent.innerHTML = renderCreditPurchasesTab(creditPurchases)
+        if (tab === 'products') tabContent.innerHTML = renderProductsTab(supplierProducts)
+        if (tab === 'movements') tabContent.innerHTML = renderCreditPurchasesTab(creditPurchases)
       })
     })
 
@@ -535,6 +549,60 @@ export async function render(container) {
             
             <div style="margin-top:0.75rem;font-size:0.75rem;color:var(--muted)">
               Created: ${new Date(payment.created_at).toLocaleString()}
+            </div>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  function renderProductsTab(products) {
+    if (!products.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No products found from this supplier</div>'
+
+    return products.map(product => {
+      const createdDate = new Date(product.created_at)
+      const updatedDate = new Date(product.updated_at)
+      const totalValue = Number(product.quantity) * Number(product.unit_cost || 0)
+      const stockStatus = Number(product.quantity) <= Number(product.low_stock_threshold) ? 'Low Stock' : 'In Stock'
+      const stockColor = Number(product.quantity) <= Number(product.low_stock_threshold) ? 'var(--warning)' : 'var(--accent)'
+      
+      return `
+        <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
+          <div style="padding:1rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+              <div style="font-weight:600;color:var(--dark)">📦 ${product.item_name}</div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end">
+                <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">${fmt(totalValue)} ETB</div>
+                <div style="font-size:0.75rem;color:${stockColor};font-weight:600">${stockStatus}</div>
+              </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;font-size:0.875rem">
+              <div><strong>SKU:</strong> ${product.sku || '—'}</div>
+              <div><strong>Category:</strong> ${product.category || '—'}</div>
+              <div><strong>Current Stock:</strong> ${product.quantity} units</div>
+              <div><strong>Unit Cost:</strong> ${fmt(product.unit_cost || 0)} ETB</div>
+              <div><strong>Selling Price:</strong> ${fmt(product.selling_price || 0)} ETB</div>
+              <div><strong>Low Stock Threshold:</strong> ${product.low_stock_threshold} units</div>
+              <div><strong>Total Inventory Value:</strong> ${fmt(totalValue)} ETB</div>
+              <div><strong>Profit Margin:</strong> ${product.unit_cost && product.selling_price ? 
+                fmt(((product.selling_price - product.unit_cost) / product.unit_cost * 100), 1) + '%' : '—'}</div>
+              <div><strong>Product ID:</strong> <span style="font-family:monospace;color:var(--muted);font-size:0.75rem">${product.id}</span></div>
+              <div><strong>Store ID:</strong> <span style="font-family:monospace;color:var(--muted);font-size:0.75rem">${product.store_id}</span></div>
+            </div>
+            
+            ${product.extra_fields && Object.keys(product.extra_fields).length > 0 ? `
+              <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border)">
+                <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem"><strong>Extra Fields:</strong></div>
+                <div style="font-size:0.8125rem;font-family:monospace;color:var(--muted);background:var(--bg-subtle);padding:0.5rem;border-radius:6px">
+                  ${JSON.stringify(product.extra_fields, null, 2)}
+                </div>
+              </div>
+            ` : ''}
+            
+            <div style="margin-top:0.75rem;font-size:0.75rem;color:var(--muted);display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem">
+              <div><strong>Created:</strong> ${createdDate.toLocaleString()}</div>
+              <div><strong>Last Updated:</strong> ${updatedDate.toLocaleString()}</div>
             </div>
           </div>
         </div>
