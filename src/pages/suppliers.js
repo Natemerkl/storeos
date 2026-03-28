@@ -289,13 +289,55 @@ export async function render(container) {
       const paymentVendor = allVendors.find(v => v.id === p.vendor_id)
       return paymentVendor?.vendor_name === vendorName
     })
-    const creditPurchases = allStockMovements.filter(sm => {
-      // Match by reference_id if it points to a vendor debt
-      return debts.some(d => d.id === sm.reference_id)
-    })
+    
+    // Fetch full stock movements with inventory details
+    const { data: stockMovementsWithDetails } = await supabase
+      .from('stock_movements')
+      .select(`
+        *,
+        inventory_items!inner(
+          item_name,
+          sku,
+          category,
+          selling_price,
+          supplier,
+          unit_cost,
+          quantity,
+          extra_fields
+        )
+      `)
+      .in('reference_id', debts.map(d => d.id))
+
+    // Fetch payments with cash account details
+    const { data: paymentsWithAccounts } = await supabase
+      .from('vendor_payments')
+      .select(`
+        *,
+        cash_accounts(
+          account_name,
+          account_type,
+          balance,
+          bank_name,
+          account_number
+        )
+      `)
+      .eq('vendor_id', vendorId)
+
+    const creditPurchases = stockMovementsWithDetails || []
+    const enrichedPayments = paymentsWithAccounts || []
 
     const outstanding = debts.reduce((s, d) => s + (Number(d.amount_owed) - Number(d.amount_paid)), 0)
+    const totalPurchased = creditPurchases.reduce((s, p) => s + (Number(p.quantity) * Number(p.unit_cost || 0)), 0)
+    const totalPaid = enrichedPayments.reduce((s, p) => s + Number(p.payment_amount), 0)
     const aging = calculateAgingBreakdown(debts)
+
+    // Find last activity date
+    const allDates = [
+      ...creditPurchases.map(p => new Date(p.created_at)),
+      ...enrichedPayments.map(p => new Date(p.payment_date)),
+      ...debts.map(d => new Date(d.created_at))
+    ]
+    const lastActivity = allDates.length > 0 ? new Date(Math.max(...allDates)) : null
 
     contentEl.innerHTML = `
       <!-- Supplier Header -->
@@ -314,18 +356,22 @@ export async function render(container) {
         </div>
         
         <!-- Financial Summary -->
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem">
           <div>
             <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Outstanding Balance</div>
             <div style="font-size:1.5rem;font-weight:700;color:var(--danger)">${fmt(outstanding)} ETB</div>
           </div>
           <div>
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Total Purchases</div>
-            <div style="font-size:1.5rem;font-weight:700;color:var(--dark)">${debts.length}</div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Total Purchased</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--dark)">${fmt(totalPurchased)} ETB</div>
           </div>
           <div>
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Payments Made</div>
-            <div style="font-size:1.5rem;font-weight:700;color:var(--accent)">${payments.length}</div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Total Paid</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--accent)">${fmt(totalPaid)} ETB</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:0.25rem">Last Activity</div>
+            <div style="font-size:1.1rem;font-weight:700;color:var(--dark)">${lastActivity ? lastActivity.toLocaleDateString() : '—'}</div>
           </div>
         </div>
       </div>
@@ -377,15 +423,15 @@ export async function render(container) {
     tabBtns.forEach(btn => {
       btn.addEventListener('click', () => {
         tabBtns.forEach(b => {
-          b.style.color = 'var(--muted)'
           b.style.borderBottom = '2px solid transparent'
+          b.style.color = 'var(--muted)'
         })
-        btn.style.color = 'var(--accent)'
         btn.style.borderBottom = '2px solid var(--accent)'
+        btn.style.color = 'var(--accent)'
         
         const tab = btn.dataset.tab
         if (tab === 'debts') tabContent.innerHTML = renderDebtsTab(debts)
-        if (tab === 'payments') tabContent.innerHTML = renderPaymentsTab(payments)
+        if (tab === 'payments') tabContent.innerHTML = renderPaymentsTab(enrichedPayments)
         if (tab === 'credit') tabContent.innerHTML = renderCreditPurchasesTab(creditPurchases)
       })
     })
@@ -455,38 +501,100 @@ export async function render(container) {
   function renderPaymentsTab(payments) {
     if (!payments.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No payments recorded</div>'
 
-    return payments.map(payment => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem;border-bottom:1px solid var(--border)">
-        <div>
-          <div style="font-weight:600">${new Date(payment.payment_date).toLocaleDateString()}</div>
-          <div style="font-size:0.8125rem;color:var(--muted)">${payment.payment_method}</div>
-          ${payment.notes ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${payment.notes}</div>` : ''}
+    return payments.map(payment => {
+      const account = payment.cash_accounts
+      const paymentDate = new Date(payment.payment_date)
+      
+      return `
+        <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
+          <div style="padding:1rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+              <div style="font-weight:600;color:var(--dark)">💳 Payment</div>
+              <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">${fmt(payment.payment_amount)} ETB</div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;font-size:0.875rem">
+              <div><strong>Date:</strong> ${paymentDate.toLocaleDateString()} at ${paymentDate.toLocaleTimeString()}</div>
+              <div><strong>Method:</strong> ${payment.payment_method || '—'}</div>
+              <div><strong>Paid from:</strong> ${account?.account_name || '—'}</div>
+              <div><strong>Account Type:</strong> ${account?.account_type || '—'}</div>
+              <div><strong>Bank:</strong> ${account?.bank_name || '—'}</div>
+              <div><strong>Account #:</strong> ${account?.account_number || '—'}</div>
+              <div><strong>Current Balance:</strong> ${account?.balance ? fmt(account.balance) + ' ETB' : '—'}</div>
+              <div><strong>Payment ID:</strong> <span style="font-family:monospace;color:var(--muted);font-size:0.75rem">${payment.id}</span></div>
+            </div>
+            
+            ${payment.notes ? `
+              <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border)">
+                <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem"><strong>Notes:</strong></div>
+                <div style="font-size:0.875rem">${payment.notes}</div>
+              </div>
+            ` : ''}
+            
+            <div style="margin-top:0.75rem;font-size:0.75rem;color:var(--muted)">
+              Created: ${new Date(payment.created_at).toLocaleString()}
+            </div>
+          </div>
         </div>
-        <div style="text-align:right">
-          <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">-${fmt(payment.payment_amount)} ETB</div>
-          <div style="font-size:0.75rem;color:var(--muted)">Payment</div>
-        </div>
-      </div>
-    `).join('')
+      `
+    }).join('')
   }
 
   function renderCreditPurchasesTab(creditPurchases) {
     if (!creditPurchases.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No credit purchases found</div>'
 
-    return creditPurchases.map(purchase => `
-      <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
-        <div style="padding:1rem">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
-            <div style="font-weight:600;color:var(--dark)">${new Date(purchase.created_at).toLocaleDateString()}</div>
-            <div style="font-weight:700;color:var(--accent)">${fmt(purchase.quantity * (purchase.unit_cost || 0))} ETB</div>
+    return creditPurchases.map(purchase => {
+      const item = purchase.inventory_items
+      const createdDate = new Date(purchase.created_at)
+      const totalValue = Number(purchase.quantity) * Number(purchase.unit_cost || 0)
+      
+      return `
+        <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
+          <div style="padding:1rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+              <div style="font-weight:600;color:var(--dark)">📦 Stock Purchase</div>
+              <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">${fmt(totalValue)} ETB</div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;font-size:0.875rem">
+              <div><strong>Date:</strong> ${createdDate.toLocaleDateString()} at ${createdDate.toLocaleTimeString()}</div>
+              <div><strong>Item:</strong> ${item?.item_name || '—'}</div>
+              <div><strong>SKU:</strong> ${item?.sku || '—'}</div>
+              <div><strong>Category:</strong> ${item?.category || '—'}</div>
+              <div><strong>Quantity:</strong> ${purchase.quantity} units</div>
+              <div><strong>Unit Cost:</strong> ${fmt(purchase.unit_cost || 0)} ETB</div>
+              <div><strong>Total Value:</strong> ${fmt(totalValue)} ETB</div>
+              <div><strong>Movement:</strong> ${purchase.movement_type || '—'}</div>
+              <div><strong>Source:</strong> ${purchase.source || '—'}</div>
+              <div><strong>Reference ID:</strong> <span style="font-family:monospace;color:var(--muted);font-size:0.75rem">${purchase.reference_id || '—'}</span></div>
+              <div><strong>Current Stock:</strong> ${item?.quantity || '—'} units</div>
+              <div><strong>Current Unit Cost:</strong> ${item?.unit_cost ? fmt(item.unit_cost) + ' ETB' : '—'}</div>
+              <div><strong>Selling Price:</strong> ${item?.selling_price ? fmt(item.selling_price) + ' ETB' : '—'}</div>
+              <div><strong>Supplier:</strong> ${item?.supplier || '—'}</div>
+              <div><strong>Stock Movement ID:</strong> <span style="font-family:monospace;color:var(--muted);font-size:0.75rem">${purchase.id}</span></div>
+            </div>
+            
+            ${purchase.notes ? `
+              <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border)">
+                <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem"><strong>Notes:</strong></div>
+                <div style="font-size:0.875rem">${purchase.notes}</div>
+              </div>
+            ` : ''}
+            
+            ${item?.extra_fields ? `
+              <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border)">
+                <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.25rem"><strong>Extra Fields:</strong></div>
+                <div style="font-size:0.875rem;font-family:monospace;color:var(--muted)">${JSON.stringify(item.extra_fields, null, 2)}</div>
+              </div>
+            ` : ''}
+            
+            <div style="margin-top:0.75rem;font-size:0.75rem;color:var(--muted)">
+              Created: ${createdDate.toLocaleString()}
+            </div>
           </div>
-          <div style="font-size:0.875rem;color:var(--muted)">
-            Qty: ${purchase.quantity} × ${fmt(purchase.unit_cost || 0)} ETB each
-          </div>
-          ${purchase.notes ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${purchase.notes}</div>` : ''}
         </div>
-      </div>
-    `).join('')
+      `
+    }).join('')
   }
 
   // ── Pay Supplier Modal ─────────────────────────────────────

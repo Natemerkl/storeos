@@ -1362,8 +1362,13 @@ export async function render(container) {
     const note      = document.querySelector(noteField)?.value?.trim()
     const isCredit  = pm === 'credit'
 
+    // Enhanced validation
+    if (total <= 0) { showToast('Total amount must be greater than 0', 'error'); return }
     if (isCredit && !document.querySelector(creditName)?.value?.trim()) {
-      showToast('Customer name required for credit sale', 'error'); return
+      showToast('Credit sales require a customer', 'error'); return
+    }
+    if (!isCredit && !accountId) {
+      showToast('Please select a payment account', 'error'); return
     }
 
     const totalCost = cart.reduce((s, e) => s + e.qty * (Number(e.item.unit_cost)||0), 0)
