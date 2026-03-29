@@ -587,7 +587,8 @@ export async function render(container) {
       const createdDate = new Date(product.created_at)
       const updatedDate = new Date(product.updated_at)
       const _qty = Number(product.total_quantity) || Number(product.quantity) || 0
-      const totalValue = _qty * Number(product.unit_cost || 0)
+      const _cost = Number(product.latest_unit_cost || product.unit_cost) || 0
+      const totalValue = _qty * _cost
       const stockStatus = _qty <= Number(product.low_stock_threshold) ? 'Low Stock' : 'In Stock'
       const stockColor = _qty <= Number(product.low_stock_threshold) ? 'var(--warning)' : 'var(--accent)'
       
@@ -606,12 +607,12 @@ export async function render(container) {
               <div><strong>SKU:</strong> ${product.sku || '—'}</div>
               <div><strong>Category:</strong> ${product.category || '—'}</div>
               <div><strong>Current Stock:</strong> ${_qty} units</div>
-              <div><strong>Unit Cost:</strong> ${fmt(product.unit_cost || 0)} ETB</div>
+              <div><strong>Unit Cost:</strong> ${fmt(_cost)} ETB</div>
               <div><strong>Selling Price:</strong> ${fmt(product.selling_price || 0)} ETB</div>
               <div><strong>Low Stock Threshold:</strong> ${product.low_stock_threshold} units</div>
               <div><strong>Total Inventory Value:</strong> ${fmt(totalValue)} ETB</div>
-              <div><strong>Profit Margin:</strong> ${product.unit_cost && product.selling_price ? 
-                fmt(((product.selling_price - product.unit_cost) / product.unit_cost * 100), 1) + '%' : '—'}</div>
+              <div><strong>Profit Margin:</strong> ${_cost && product.selling_price ? 
+                fmt(((product.selling_price - _cost) / _cost * 100), 1) + '%' : '—'}</div>
               <div><strong>Product ID:</strong> <span style="font-family:monospace;color:var(--muted);font-size:0.75rem">${product.id}</span></div>
               <div><strong>Store ID:</strong> <span style="font-family:monospace;color:var(--muted);font-size:0.75rem">${product.store_id}</span></div>
             </div>
