@@ -219,7 +219,7 @@ function fillDashboard(container, data, isStale) {
 
   const items = inventoryItems || []
   const profit = periodSales - periodExpenses
-  const invVal = items.reduce((s,i) => s + Number(i.quantity) * Number(i.unit_cost||0), 0)
+  const invVal = items.reduce((s,i) => s + (Number(i.total_quantity) || Number(i.quantity) || 0) * Number(i.unit_cost||0), 0)
   const totalCash = accounts.reduce((s,a) => s + Number(a.balance), 0)
 
   // Mobile layout with action grid and scan button
@@ -358,14 +358,14 @@ function fillDashboard(container, data, isStale) {
 
   // Fill low stock alerts (remove emojis)
   if (isStale?.()) return
-  const low = items.filter(i => Number(i.quantity) <= Number(i.low_stock_threshold||5))
+  const low = items.filter(i => (Number(i.total_quantity) || Number(i.quantity) || 0) <= Number(i.low_stock_threshold||5))
   const lowEl = get('#low-stock-list')
   if (lowEl) lowEl.innerHTML = low.length === 0
     ? `<div class="empty"><div class="empty-icon">${renderIcon('check',24,'var(--success)')}</div><div class="empty-text">All items stocked</div></div>`
     : low.map(i => `
         <div class="low-stock-item" data-item-id="${i.id}" style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border);cursor:pointer;">
           <div style="font-size:13.5px;font-weight:500">${i.item_name}</div>
-          <span class="badge ${Number(i.quantity)===0?'badge-red':'badge-yellow'}">${i.quantity} left</span>
+          <span class="badge ${(Number(i.total_quantity)||Number(i.quantity)||0)===0?'badge-red':'badge-yellow'}">${Number(i.total_quantity)||Number(i.quantity)||0} left</span>
         </div>
       `).join('')
 
@@ -669,13 +669,13 @@ async function renderLite(container) {
     supabase.from('cash_accounts').select('balance').in('store_id', storeIds),
     supabase.from('sales').select('total_amount').in('store_id', storeIds).eq('sale_date', today),
     supabase.from('expenses').select('amount').in('store_id', storeIds).eq('expense_date', today),
-    supabase.from('inventory_items').select('item_name,quantity,low_stock_threshold').in('store_id', storeIds),
+    supabase.from('inventory_items').select('item_name,quantity,total_quantity,low_stock_threshold').in('store_id', storeIds),
   ])
 
   const totalCash  = (accounts||[]).reduce((s,a) => s + Number(a.balance), 0)
   const todaySales = (sales||[]).reduce((s,r) => s + Number(r.total_amount), 0)
   const todayExp   = (expenses||[]).reduce((s,r) => s + Number(r.amount), 0)
-  const low        = (items||[]).filter(i => Number(i.quantity) <= Number(i.low_stock_threshold || 5))
+  const low        = (items||[]).filter(i => (Number(i.total_quantity)||Number(i.quantity)||0) <= Number(i.low_stock_threshold || 5))
 
   container.innerHTML = `
     <div style="padding-top:0.5rem">
@@ -709,7 +709,7 @@ async function renderLite(container) {
           : low.map(i => `
               <div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)">
                 <span style="font-size:13px">${i.item_name}</span>
-                <span class="badge ${Number(i.quantity)===0?'badge-red':'badge-yellow'}">${i.quantity} left</span>
+                <span class="badge ${(Number(i.total_quantity)||Number(i.quantity)||0)===0?'badge-red':'badge-yellow'}">${Number(i.total_quantity)||Number(i.quantity)||0} left</span>
               </div>
             `).join('')
         }

@@ -532,9 +532,9 @@ export async function render(container) {
     if (viewMode === 'grid') {
       el.innerHTML = filtered.map(item => {
         const inCart     = cart.find(c => c.item.id === item.id)
-        const outOfStock = Number(item.quantity) <= 0
+        const outOfStock = Number(item.total_quantity) <= 0
         const price      = getItemPrice(item)
-        const isLow      = !outOfStock && Number(item.quantity) <= Number(item.low_stock_threshold || 5)
+        const isLow      = !outOfStock && Number(item.total_quantity) <= Number(item.low_stock_threshold || 5)
 
         // Category color accent
         const catColors = {
@@ -600,7 +600,7 @@ export async function render(container) {
               ">
                 <div style="width:5px;height:5px;border-radius:50%;flex-shrink:0;
                   background:${outOfStock ? '#EF4444' : isLow ? '#F59E0B' : '#22C55E'};"></div>
-                ${outOfStock ? 'Out of stock' : isLow ? item.quantity + ' left' : item.quantity + ' in stock'}
+                ${outOfStock ? 'Out of stock' : isLow ? item.total_quantity + ' left' : item.total_quantity + ' in stock'}
               </div>
             </div>
 
@@ -641,7 +641,7 @@ export async function render(container) {
         <div class="product-list">
           ${filtered.map(item => {
             const inCart     = cart.find(c => c.item.id === item.id)
-            const outOfStock = Number(item.quantity) <= 0
+            const outOfStock = Number(item.total_quantity) <= 0
             const price      = getItemPrice(item)
             return `
               <div class="product-row ${inCart?'in-cart':''} ${outOfStock?'out-of-stock':''}"
@@ -654,7 +654,7 @@ export async function render(container) {
                   <div class="product-row-meta">
                     ${item.category ? `<span>${item.category}</span>` : ''}
                     <span class="${outOfStock?'out-of-stock-text':'in-stock-text'}">
-                      ${outOfStock ? 'Out of stock' : item.quantity + ' in stock'}
+                      ${outOfStock ? 'Out of stock' : item.total_quantity + ' in stock'}
                     </span>
                   </div>
                 </div>
@@ -1413,6 +1413,14 @@ export async function render(container) {
             source:        'sale',
             reference_id:  sale.id,
           })
+          const { error: allocErr } = await supabase.rpc('allocate_fifo_sale', {
+            p_sale_id:    sale.id,
+            p_item_id:    entry.item.id,
+            p_store_id:   currentStore?.id,
+            p_quantity:   entry.qty,
+            p_sale_price: entry.price,
+          })
+          if (allocErr) console.warn('FIFO alloc error for', entry.item.item_name, ':', allocErr.message)
         }
       }
 

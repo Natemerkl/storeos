@@ -799,40 +799,79 @@ export async function openSmartOCRModal(logId) {
   }
 
   async function doInventory(valid, date, accId, totalAmt, isCredit, vendorName, vendorPhone) {
+    const accName = accId ? (accounts.find(a => a.id === accId)?.account_name || null) : null
+
     for (const item of valid) {
-      const { error } = await supabase.from('inventory_items').insert({
-        store_id:             currentStore?.id,
-        item_name:            item.name,
-        quantity:             item.qty   || 0,
-        unit_cost:            item.price || null,
-        selling_price:        item.price || null,
-        supplier:             vendorName || null,
-        transport_fee:        transportAmt > 0 ? transportAmt : null,
-        targa:                custTarga  || null,
-        delivery_place:       custPlace  || null,
-        paid_from_account_id: (!isCredit && accId) ? accId : null,
+      let matched = (inventoryItems || []).find(ii =>
+        ii.item_name.toLowerCase() === item.name.toLowerCase()
+      ) || (inventoryItems?.length
+        ? fuzzyMatch(item.name, inventoryItems, { key: 'item_name', threshold: 0.7, limit: 1 })[0]
+        : null)
+
+      let itemId = matched?.id || null
+
+      if (!itemId) {
+        // Live DB check to prevent duplicates if OCR is run multiple times
+        const { data: dbItem } = await supabase
+          .from('inventory_items')
+          .select('id')
+          .eq('store_id', currentStore?.id)
+          .ilike('item_name', item.name)
+          .limit(1)
+          .maybeSingle()
+        itemId = dbItem?.id || null
+      }
+
+      if (!itemId) {
+        const { data: newItem, error: newErr } = await supabase.from('inventory_items').insert({
+          store_id:      currentStore?.id,
+          item_name:     item.name,
+          unit_cost:     item.price || null,
+          selling_price: item.price || null,
+          supplier:      vendorName || null,
+        }).select('id').single()
+        if (newErr) throw newErr
+        itemId = newItem.id
+        // Update in-memory list so subsequent items in this run also find it
+        if (inventoryItems) inventoryItems.push({ id: itemId, item_name: item.name })
+      }
+
+      const { error } = await supabase.rpc('add_stock_batch', {
+        p_store_id:          currentStore?.id,
+        p_item_id:           itemId,
+        p_quantity:          item.qty || 1,
+        p_unit_cost:         item.price || 0,
+        p_purchase_date:     date,
+        p_supplier_id:       null,
+        p_supplier_name:     vendorName || null,
+        p_cash_account_id:   (!isCredit && accId) ? accId : null,
+        p_cash_account_name: (!isCredit && accId) ? accName : null,
+        p_transport_fee:     transportAmt || 0,
+        p_targa:             custTarga || null,
+        p_delivery_place:    custPlace || null,
+        p_notes:             'Added via OCR scan',
       })
       if (error) throw error
     }
 
     if (isCredit && vendorName) {
       await supabase.from('vendor_debts').insert({
-        store_id: currentStore?.id,
+        store_id:    currentStore?.id,
         vendor_name: vendorName,
         amount_owed: totalAmt,
         amount_paid: 0,
-        status: 'unpaid',
-        notes: 'Inventory Purchase logged from OCR scanner'
+        status:      'unpaid',
+        notes:       'Inventory Purchase logged from OCR scanner',
       })
     } else if (accId && !isCredit && totalAmt > 0) {
       await supabase.from('expenses').insert({
-        store_id: currentStore?.id,
+        store_id:        currentStore?.id,
         cash_account_id: accId,
-        expense_date: date,
-        amount: totalAmt,
-        description: ('Inventory Purchase' + (vendorName ? ' from ' + vendorName : '')).trim(),
-        source: 'ocr',
-        ocr_log_id: logId,
+        expense_date:    date,
+        amount:          totalAmt,
+        description:     ('Inventory Purchase' + (vendorName ? ' from ' + vendorName : '')).trim(),
+        source:          'ocr',
+        ocr_log_id:      logId,
       })
     }
   }

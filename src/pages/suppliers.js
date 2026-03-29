@@ -290,13 +290,36 @@ export async function render(container) {
       return paymentVendor?.vendor_name === vendorName
     })
     
-    // Fetch inventory items from this supplier
-    const { data: supplierItems } = await supabase
+    // All vendor_purchases for this vendor (cash + credit)
+    const vendorPurchaseHistory = allPurchases.filter(p => p.vendor_id === vendorId)
+
+    // Fetch inventory items from this supplier — case-insensitive match
+    const { data: supplierItemsByName } = await supabase
       .from('inventory_items')
       .select('*')
-      .eq('supplier', vendorName)
+      .ilike('supplier', vendorName)
       .eq('store_id', currentStore?.id)
       .order('created_at', { ascending: false })
+
+    // Also fetch items linked via vendor_purchases (catches cash purchases where supplier text may differ)
+    const linkedItemIds = [...new Set(vendorPurchaseHistory.map(p => p.inventory_item_id).filter(Boolean))]
+    let linkedItems = []
+    if (linkedItemIds.length > 0) {
+      const { data: byId } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .in('id', linkedItemIds)
+        .eq('store_id', currentStore?.id)
+      linkedItems = byId || []
+    }
+
+    // Merge both lists, deduplicate by id
+    const seen = new Set()
+    const supplierItems = [...(supplierItemsByName || []), ...linkedItems].filter(item => {
+      if (seen.has(item.id)) return false
+      seen.add(item.id)
+      return true
+    })
 
     // Fetch full stock movements with inventory details - match by supplier name in inventory_items
     const { data: stockMovementsWithDetails } = await supabase
@@ -336,11 +359,12 @@ export async function render(container) {
     const creditPurchases = stockMovementsWithDetails || []
     const enrichedPayments = paymentsWithAccounts || []
     const supplierProducts = supplierItems || []
+    const allVendorPurchases = vendorPurchaseHistory || []
 
     const outstanding = debts.reduce((s, d) => s + (Number(d.amount_owed) - Number(d.amount_paid)), 0)
     const totalPurchased = creditPurchases.reduce((s, p) => s + (Number(p.quantity) * Number(p.unit_cost || 0)), 0)
     const totalPaid = enrichedPayments.reduce((s, p) => s + Number(p.payment_amount), 0)
-    const totalInventoryValue = supplierProducts.reduce((s, item) => s + (Number(item.quantity) * Number(item.unit_cost || 0)), 0)
+    const totalInventoryValue = supplierProducts.reduce((s, item) => s + ((Number(item.total_quantity)||Number(item.quantity)||0) * Number(item.unit_cost || 0)), 0)
     const aging = calculateAgingBreakdown(debts)
 
     // Find last activity date
@@ -421,7 +445,7 @@ export async function render(container) {
           Products (${supplierProducts.length})
         </button>
         <button class="detail-tab-btn" data-tab="movements" style="padding:0.5rem 1rem;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted)">
-          Stock Movements (${creditPurchases.length})
+          Purchase History (${allVendorPurchases.length})
         </button>
       </div>
 
@@ -448,7 +472,7 @@ export async function render(container) {
         if (tab === 'debts') tabContent.innerHTML = renderDebtsTab(debts)
         if (tab === 'payments') tabContent.innerHTML = renderPaymentsTab(enrichedPayments)
         if (tab === 'products') tabContent.innerHTML = renderProductsTab(supplierProducts)
-        if (tab === 'movements') tabContent.innerHTML = renderCreditPurchasesTab(creditPurchases)
+        if (tab === 'movements') tabContent.innerHTML = renderPurchaseHistoryTab(allVendorPurchases)
       })
     })
 
@@ -562,9 +586,10 @@ export async function render(container) {
     return products.map(product => {
       const createdDate = new Date(product.created_at)
       const updatedDate = new Date(product.updated_at)
-      const totalValue = Number(product.quantity) * Number(product.unit_cost || 0)
-      const stockStatus = Number(product.quantity) <= Number(product.low_stock_threshold) ? 'Low Stock' : 'In Stock'
-      const stockColor = Number(product.quantity) <= Number(product.low_stock_threshold) ? 'var(--warning)' : 'var(--accent)'
+      const _qty = Number(product.total_quantity) || Number(product.quantity) || 0
+      const totalValue = _qty * Number(product.unit_cost || 0)
+      const stockStatus = _qty <= Number(product.low_stock_threshold) ? 'Low Stock' : 'In Stock'
+      const stockColor = _qty <= Number(product.low_stock_threshold) ? 'var(--warning)' : 'var(--accent)'
       
       return `
         <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
@@ -580,7 +605,7 @@ export async function render(container) {
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;font-size:0.875rem">
               <div><strong>SKU:</strong> ${product.sku || '—'}</div>
               <div><strong>Category:</strong> ${product.category || '—'}</div>
-              <div><strong>Current Stock:</strong> ${product.quantity} units</div>
+              <div><strong>Current Stock:</strong> ${_qty} units</div>
               <div><strong>Unit Cost:</strong> ${fmt(product.unit_cost || 0)} ETB</div>
               <div><strong>Selling Price:</strong> ${fmt(product.selling_price || 0)} ETB</div>
               <div><strong>Low Stock Threshold:</strong> ${product.low_stock_threshold} units</div>
@@ -661,6 +686,38 @@ export async function render(container) {
             <div style="margin-top:0.75rem;font-size:0.75rem;color:var(--muted)">
               Created: ${createdDate.toLocaleString()}
             </div>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  function renderPurchaseHistoryTab(purchases) {
+    if (!purchases.length) return '<div style="text-align:center;padding:2rem;color:var(--muted)">No purchases recorded for this supplier</div>'
+
+    return purchases.map(p => {
+      const isCash = !!p.paid_from_account_id
+      const total  = Number(p.total_cost || 0)
+      const date   = new Date(p.purchase_date)
+
+      return `
+        <div style="border:1px solid var(--border);border-radius:12px;margin-bottom:1rem;background:var(--bg-elevated)">
+          <div style="padding:1rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+              <div style="font-weight:600;color:var(--dark)">📦 ${p.product_name || '—'}</div>
+              <div style="display:flex;gap:0.5rem;align-items:center">
+                <span class="badge ${isCash ? 'badge-teal' : 'badge-red'}">${isCash ? '💳 Paid' : '📋 Credit'}</span>
+                <div style="font-weight:700;color:var(--accent);font-size:1.0625rem">${fmt(total)} ETB</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;font-size:0.875rem">
+              <div><strong>Date:</strong> ${date.toLocaleDateString()}</div>
+              <div><strong>Qty:</strong> ${p.quantity} units</div>
+              <div><strong>Unit Cost:</strong> ${fmt(p.unit_cost || 0)} ETB</div>
+              <div><strong>Total:</strong> ${fmt(total)} ETB</div>
+              <div><strong>Payment:</strong> ${p.payment_method || (isCash ? 'bank' : 'credit')}</div>
+            </div>
+            ${p.notes ? `<div style="margin-top:0.5rem;font-size:0.875rem;color:var(--muted)">${p.notes}</div>` : ''}
           </div>
         </div>
       `

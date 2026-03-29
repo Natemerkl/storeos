@@ -87,7 +87,7 @@ export async function render(container) {
   async function loadAccounts() {
     const { data } = await supabase
       .from('cash_accounts')
-      .select('id, name, account_type, balance, store_id, stores(name)')
+      .select('id, account_name, account_type, balance, store_id, stores(name)')
       .in('store_id', storeIds)
       .order('account_type')
 
@@ -97,7 +97,7 @@ export async function render(container) {
     const grid = container.querySelector('#accounts-grid')
     grid.innerHTML = accounts.map(a => `
       <div class="kpi-card" style="border-left:3px solid ${a.account_type === 'till' ? 'var(--accent)' : 'var(--dark)'}">
-        <div class="kpi-label">${a.name}</div>
+        <div class="kpi-label">${a.account_name}</div>
         <div class="kpi-value ${a.account_type === 'till' ? 'accent' : ''}">${fmt(a.balance)}</div>
         <div class="kpi-sub">
           ${a.account_type === 'till' ? '🏪 Till' : '🏦 Bank'}
@@ -111,7 +111,7 @@ export async function render(container) {
     const toSel   = container.querySelector('#to-account')
 
     const options = accounts.map(a =>
-      `<option value="${a.id}" data-balance="${a.balance}">${a.name} (${fmt(a.balance)} ETB)</option>`
+      `<option value="${a.id}" data-balance="${a.balance}">${a.account_name} (${fmt(a.balance)} ETB)</option>`
     ).join('')
 
     fromSel.innerHTML = options
@@ -128,8 +128,8 @@ export async function render(container) {
       .from('cash_transfers')
       .select(`
         *,
-        from_account:from_account_id(name),
-        to_account:to_account_id(name)
+        from_account:from_account_id(account_name),
+        to_account:to_account_id(account_name)
       `)
       .in('store_id', storeIds)
       .order('created_at', { ascending: false })
@@ -147,11 +147,11 @@ export async function render(container) {
         <td>${new Date(t.created_at).toLocaleDateString()}</td>
         <td>
           <span style="color:var(--danger)">↑</span>
-          ${t.from_account?.name || '—'}
+          ${t.from_account?.account_name || '—'}
         </td>
         <td>
           <span style="color:var(--accent)">↓</span>
-          ${t.to_account?.name || '—'}
+          ${t.to_account?.account_name || '—'}
         </td>
         <td style="font-weight:700">${fmt(t.amount)} ETB</td>
         <td style="color:var(--muted)">${t.notes || '—'}</td>
@@ -197,7 +197,7 @@ export async function render(container) {
 
     const fromAcc = accounts.find(a => a.id === fromId)
     if (fromAcc && amount > Number(fromAcc.balance)) {
-      if (!confirm(`⚠️ This will overdraw ${fromAcc.name}. Continue?`)) return
+      if (!confirm(`⚠️ This will overdraw ${fromAcc.account_name}. Continue?`)) return
     }
 
     const btn = container.querySelector('#btn-confirm-transfer')
@@ -225,7 +225,7 @@ export async function render(container) {
       const toAccObj   = accounts.find(a => a.id === toId)
 
       // Audit log
-      await audit.transferCreated(data, fromAccObj?.name, toAccObj?.name)
+      await audit.transferCreated(data, fromAccObj?.account_name, toAccObj?.account_name)
 
       try {
         await postTransferEntry({

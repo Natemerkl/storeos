@@ -159,11 +159,11 @@ export async function render(container) {
   // Load cash accounts for dropdowns
   const { data: accounts } = await supabase
     .from('cash_accounts')
-    .select('id, name, account_type')
+    .select('id, account_name, account_type')
     .in('store_id', storeIds)
 
   const accountOptions = (accounts || []).map(a =>
-    `<option value="${a.id}">${a.name}</option>`
+    `<option value="${a.id}">${a.account_name}</option>`
   ).join('')
 
   container.querySelector('#sale-account').innerHTML = accountOptions

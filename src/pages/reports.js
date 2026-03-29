@@ -128,14 +128,28 @@ export async function render(container) {
     const [{ data: sales }, { data: expenses }, { data: items }, { data: accounts }] = await Promise.all([
       supabase.from('sales').select('*').in('store_id', storeIds).gte('sale_date', from).lte('sale_date', to),
       supabase.from('expenses').select('*').in('store_id', storeIds).gte('expense_date', from).lte('expense_date', to),
-      supabase.from('inventory_items').select('item_name, quantity, unit_cost, selling_price').in('store_id', storeIds),
+      supabase.from('inventory_items').select('item_name, quantity, total_quantity, unit_cost, selling_price').in('store_id', storeIds),
       supabase.from('cash_accounts').select('*, stores(name)').in('store_id', storeIds),
     ])
 
     const totalSales    = (sales    || []).reduce((s, r) => s + Number(r.total_amount), 0)
     const totalExpenses = (expenses || []).reduce((s, r) => s + Number(r.amount), 0)
     const netProfit     = totalSales - totalExpenses
-    const invValue      = (items    || []).reduce((s, i) => s + Number(i.quantity) * Number(i.unit_cost || 0), 0)
+    const invValue      = (items    || []).reduce((s, i) => s + (Number(i.total_quantity) || Number(i.quantity) || 0) * Number(i.unit_cost || 0), 0)
+
+    // FIFO gross profit from sale_items.total_profit (if batches are allocated)
+    const saleIds = (sales || []).map(s => s.id)
+    let fifoGrossProfit = null
+    if (saleIds.length > 0) {
+      const { data: sipData } = await supabase
+        .from('sale_items')
+        .select('total_profit')
+        .in('sale_id', saleIds)
+        .not('total_profit', 'is', null)
+      if (sipData && sipData.length > 0) {
+        fifoGrossProfit = sipData.reduce((s, r) => s + Number(r.total_profit || 0), 0)
+      }
+    }
 
     // KPIs
     container.querySelector('#r-sales').textContent    = fmt(totalSales)
@@ -143,6 +157,10 @@ export async function render(container) {
     const profitEl = container.querySelector('#r-profit')
     profitEl.textContent = fmt(netProfit)
     profitEl.style.color = netProfit >= 0 ? 'var(--accent)' : 'var(--danger)'
+    if (fifoGrossProfit !== null) {
+      const sub = profitEl.closest('.kpi-card')?.querySelector('.kpi-sub')
+      if (sub) sub.textContent = `ETB · Gross (FIFO): ${fmt(fifoGrossProfit)}`
+    }
     container.querySelector('#r-inventory').textContent = fmt(invValue)
 
     // ── Overview chart (daily sales vs expenses) ───────────
@@ -202,25 +220,28 @@ export async function render(container) {
 
     // ── Top items ──────────────────────────────────────────
     const topEl = container.querySelector('#top-items')
-    const sorted = [...(items || [])].sort((a, b) =>
-      Number(b.quantity) * Number(b.selling_price || 0) -
-      Number(a.quantity) * Number(a.selling_price || 0)
-    ).slice(0, 6)
+    const sorted = [...(items || [])].sort((a, b) => {
+      const qa = Number(a.total_quantity) || Number(a.quantity) || 0
+      const qb = Number(b.total_quantity) || Number(b.quantity) || 0
+      return qb * Number(b.selling_price || 0) - qa * Number(a.selling_price || 0)
+    }).slice(0, 6)
 
     if (sorted.length === 0) {
       topEl.innerHTML = `<div class="empty"><div class="empty-text">No inventory data</div></div>`
     } else {
-      topEl.innerHTML = sorted.map(i => `
+      topEl.innerHTML = sorted.map(i => {
+        const qty = Number(i.total_quantity) || Number(i.quantity) || 0
+        return `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:0.55rem 0;border-bottom:1px solid var(--border)">
           <div>
             <div style="font-weight:500;font-size:13.5px">${i.item_name}</div>
-            <div style="font-size:11.5px;color:var(--muted)">Qty: ${i.quantity}</div>
+            <div style="font-size:11.5px;color:var(--muted)">Qty: ${qty}</div>
           </div>
           <div style="font-weight:600;color:var(--accent)">
-            ${fmt(Number(i.quantity) * Number(i.selling_price || 0))} ETB
+            ${fmt(qty * Number(i.selling_price || 0))} ETB
           </div>
         </div>
-      `).join('')
+      `}).join('')
     }
 
     // ── Cash summary ───────────────────────────────────────

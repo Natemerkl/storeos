@@ -34,7 +34,7 @@ export async function getDashboardData(forceRefresh = false) {
     supabase.from('cash_accounts').select('id,account_name,account_type,balance').in('store_id', ids),
     supabase.from('sales').select('total_amount').in('store_id', ids).gte('sale_date', startDate).lte('sale_date', endDate),
     supabase.from('expenses').select('amount').in('store_id', ids).gte('expense_date', startDate).lte('expense_date', endDate),
-    supabase.from('inventory_items').select('item_name,quantity,low_stock_threshold,unit_cost,selling_price').in('store_id', ids),
+    supabase.from('inventory_items').select('item_name,quantity,total_quantity,low_stock_threshold,unit_cost,selling_price').in('store_id', ids),
     supabase.from('sales').select('id,total_amount,sale_date,created_at,payment_method').in('store_id', ids).gte('sale_date', startDate).lte('sale_date', endDate).order('created_at', { ascending: false }).limit(5),
     supabase.from('expenses').select('id,amount,description,expense_date,created_at').in('store_id', ids).gte('expense_date', startDate).lte('expense_date', endDate).order('created_at', { ascending: false }).limit(5),
   ])
