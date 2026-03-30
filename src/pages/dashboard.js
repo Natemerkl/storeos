@@ -3,6 +3,8 @@ import { appStore } from '../store.js'
 import { getDashboardData } from '../utils/db.js'
 import { renderIcon } from '../components/icons.js'
 import { renderDateRangeSelector } from '../components/date-range-selector.js'
+import { formatDate, getDateFormat } from '../utils/format-date.js'
+import { toEthiopian } from '../utils/ethiopian-date.js'
 
 export async function render(container) {
   const { currentStore, accountingView } = appStore.getState()
@@ -62,7 +64,7 @@ function buildSkeleton(currentStore, accountingView) {
             <div class="telebirr-avatar">${(currentStore?.name || 'S').charAt(0).toUpperCase()}</div>
             <div>
               <div class="telebirr-name">${currentStore?.name || 'Store 1'}</div>
-              <div class="telebirr-store">Wed 14 Megabit 2017 · EN / AM</div>
+              <div class="telebirr-store">${getCurrentDateDisplay()}</div>
             </div>
           </div>
           <div class="telebirr-icons">
@@ -862,4 +864,22 @@ function timeAgo(dateStr) {
   if (mins  < 60) return `${mins}m ago`
   if (hours < 24) return `${hours}h ago`
   return `${days}d ago`
+}
+
+function getCurrentDateDisplay() {
+  const now = new Date()
+  const fmt = getDateFormat()
+  
+  if (fmt === 'et') {
+    // Ethiopian calendar with Amharic weekday
+    const et = toEthiopian(now)
+    const weekdayShort = et.dayName.substring(0, 3) // First 3 chars of Amharic day
+    const dateStr = formatDate(now, { short: true })
+    return `${weekdayShort} ${dateStr} · AM`
+  } else {
+    // Gregorian calendar with English weekday
+    const weekday = now.toLocaleDateString('en-US', { weekday: 'short' })
+    const dateStr = formatDate(now, { short: true })
+    return `${weekday} ${dateStr} · EN`
+  }
 }
