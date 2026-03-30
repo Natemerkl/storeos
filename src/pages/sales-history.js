@@ -39,24 +39,24 @@ export async function render(container) {
 
     <!-- Filters -->
     <div class="card" style="margin-bottom:1rem">
-      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center">
-        <div id="date-range-container"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.625rem;align-items:center">
+        <div id="date-range-container" style="grid-column:1/-1"></div>
         
-        <select class="form-input" id="filter-type" style="max-width:120px">
+        <select class="form-input" id="filter-type" style="font-size:0.875rem">
           <option value="">All Types</option>
           <option value="pos">POS</option>
           <option value="ocr">OCR</option>
           <option value="credit">Credit</option>
         </select>
         
-        <select class="form-input" id="filter-account" style="max-width:160px">
+        <select class="form-input" id="filter-account" style="font-size:0.875rem">
           <option value="">All Payment Methods</option>
           ${cashAccounts.map(a => `<option value="${a.id}">${a.account_name}</option>`).join('')}
         </select>
         
-        <input type="text" class="form-input" id="filter-search" placeholder="Search..." style="max-width:200px">
+        <input type="text" class="form-input" id="filter-search" placeholder="Search..." style="font-size:0.875rem;grid-column:span 2">
         
-        <button class="btn btn-outline btn-sm" id="btn-clear-filters">Clear</button>
+        <button class="btn btn-outline btn-sm" id="btn-clear-filters" style="font-size:0.875rem">Clear</button>
       </div>
     </div>
 
@@ -332,37 +332,37 @@ function renderSales() {
     
     // Main sale info - always visible
     html += '<div class="sale-header" style="'
-    html += 'padding:1rem;'
+    html += 'padding:0.875rem;'
     html += 'cursor:pointer;'
     html += 'display:flex;'
-    html += 'align-items:center;'
+    html += 'align-items:flex-start;'
     html += 'justify-content:space-between;'
-    html += 'gap:1rem;'
+    html += 'gap:0.75rem;'
     html += '" onclick="toggleSaleItems(\'' + sale.id + '\')">'
     
-    html += '<div style="flex:1;min-width:0">'
-    html += '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem">'
-    html += '<span style="font-weight:600;color:var(--dark)">' + productDisplay + '</span>'
-    html += '<span style="font-size:0.875rem;color:var(--muted)">' + dateTime + '</span>'
+    html += '<div style="flex:1;min-width:0;overflow:hidden">'
+    html += '<div style="margin-bottom:0.5rem">'
+    html += '<div style="font-weight:600;color:var(--dark);font-size:0.9375rem;margin-bottom:0.25rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + productDisplay + '</div>'
+    html += '<div style="font-size:0.8125rem;color:var(--muted)">' + dateTime + '</div>'
     html += '</div>'
     const customerName = sale.customers?.name || sale.credit_sales?.[0]?.customers?.name
     
-    html += '<div style="display:flex;align-items:center;gap:0.5rem">'
-    html += '<span class="badge badge-grey">' + (sale.cash_accounts?.account_name || (sale.payment_method === 'credit' ? 'Credit Account' : 'Unknown')) + '</span>'
-    html += '<span class="badge badge-' + (sale.source === 'ocr' ? 'blue' : sale.payment_method === 'credit' ? 'orange' : 'green') + '">'
+    html += '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.375rem;margin-bottom:0.5rem">'
+    html += '<span class="badge badge-grey" style="font-size:0.75rem">' + (sale.cash_accounts?.account_name || (sale.payment_method === 'credit' ? 'Credit Account' : 'Unknown')) + '</span>'
+    html += '<span class="badge badge-' + (sale.source === 'ocr' ? 'blue' : sale.payment_method === 'credit' ? 'orange' : 'green') + '" style="font-size:0.75rem">'
     html += (sale.source === 'ocr' ? 'OCR' : sale.payment_method === 'credit' ? 'Credit' : 'POS') + '</span>'
     if (customerName) {
-      html += '<span class="badge badge-blue">' + customerName + '</span>'
+      html += '<span class="badge badge-blue" style="font-size:0.75rem;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + customerName + '</span>'
     }
-    html += '<span style="font-weight:700;color:var(--accent);font-size:1.0625rem">'
+    html += '</div>'
+    html += '<div style="font-weight:700;color:var(--accent);font-size:1.125rem">'
     html += fmt(sale.total_amount) + ' ETB'
-    html += '</span>'
     html += '</div>'
     html += '</div>'
     
-    html += '<div style="display:flex;align-items:center;gap:0.5rem">'
-    html += '<button class="btn btn-outline btn-sm" onclick="shareReceipt(\'' + sale.id + '\'); event.stopPropagation();">'
-    html += renderIcon('share', 13) + ' Share'
+    html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.5rem;flex-shrink:0">'
+    html += '<button class="btn btn-outline btn-sm" style="padding:0.375rem 0.625rem;font-size:0.8125rem;white-space:nowrap" onclick="shareReceipt(\'' + sale.id + '\'); event.stopPropagation();">'
+    html += renderIcon('share', 12) + ' Share'
     html += '</button>'
     html += '<div style="'
     html += 'width:24px;height:24px;'
