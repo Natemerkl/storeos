@@ -14,6 +14,7 @@ let cashAccounts = []
 let expandedSales = new Set()
 let isLoading = true
 let totalCount = 0
+let dateRangeListener = null
 
 export async function render(container) {
   console.log('sales-history render function called!')
@@ -97,8 +98,18 @@ export async function render(container) {
   container.querySelector('#btn-clear-filters').addEventListener('click', clearFilters)
   container.querySelector('#btn-load-more').addEventListener('click', loadMore)
   
-  // Listen for date range changes
-  window.addEventListener('dateRangeChanged', applyFilters)
+  // Remove old date range listener if exists
+  if (dateRangeListener) {
+    window.removeEventListener('dateRangeChanged', dateRangeListener)
+  }
+  
+  // Listen for date range changes - reload data from server
+  dateRangeListener = async () => {
+    currentPage = 1
+    expandedSales.clear()
+    await loadSales()
+  }
+  window.addEventListener('dateRangeChanged', dateRangeListener)
 }
 
 function renderSkeletonLoader() {
@@ -135,6 +146,11 @@ async function loadSales() {
   const { currentStore, accountingView, stores, dateRange } = appStore.getState()
   const storeIds = accountingView === 'joint' ? stores.map(s => s.id) : [currentStore?.id]
   console.log('Loading sales for store IDs:', storeIds)
+  console.log('Date range:', dateRange)
+
+  // Ensure we have valid date range
+  const startDate = dateRange?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const endDate = dateRange?.endDate || new Date().toISOString().split('T')[0]
 
   // Use the optimized single query with JSON aggregation
   const { data: sales, error, count } = await supabase
@@ -176,10 +192,9 @@ async function loadSales() {
       )
     `, { count: 'exact' })
     .in('store_id', storeIds)
-    .gte('created_at', `${dateRange.startDate}T00:00:00Z`)
-    .lte('created_at', `${dateRange.endDate}T23:59:59Z`)
+    .gte('created_at', `${startDate}T00:00:00Z`)
+    .lte('created_at', `${endDate}T23:59:59Z`)
     .order('created_at', { ascending: false })
-    .limit(pageSize)
 
   if (error) {
     console.error('Error loading sales:', error)
@@ -195,7 +210,7 @@ async function loadSales() {
     return
   }
 
-  console.log('Loaded sales:', sales)
+  console.log('Loaded sales:', sales?.length || 0, 'records')
   allSales = sales || []
   totalCount = count || 0
   isLoading = false
@@ -203,15 +218,12 @@ async function loadSales() {
 }
 
 function applyFilters() {
-  const { dateRange } = appStore.getState()
   const typeId = document.querySelector('#filter-type')?.value
   const accountId = document.querySelector('#filter-account')?.value
-  const searchText = document.querySelector('#filter-search')?.value.toLowerCase()
+  const searchText = document.querySelector('#filter-search')?.value?.toLowerCase() || ''
 
   filteredSales = allSales.filter(sale => {
-    const saleDate = sale.created_at?.split('T')[0]
-    const dateMatch = (!dateRange.startDate || saleDate >= dateRange.startDate) && (!dateRange.endDate || saleDate <= dateRange.endDate)
-    
+    // Type filter
     let typeMatch = true
     if (typeId === 'pos') {
       typeMatch = sale.source === 'manual' && sale.payment_method !== 'credit'
@@ -221,16 +233,18 @@ function applyFilters() {
       typeMatch = sale.payment_method === 'credit'
     }
     
-    const accountMatch = !accountId || (sale.cash_account_id && sale.cash_account_id === accountId)
-    const customerName = sale.customers?.name || sale.credit_sales?.[0]?.customers?.name
+    // Account filter - convert both to strings for comparison
+    const accountMatch = !accountId || (sale.cash_account_id && String(sale.cash_account_id) === String(accountId))
     
+    // Search filter
+    const customerName = sale.customers?.name || sale.credit_sales?.[0]?.customers?.name
     const searchMatch = !searchText || 
       sale.id.toString().includes(searchText) ||
       sale.total_amount.toString().includes(searchText) ||
       sale.cash_accounts?.account_name?.toLowerCase().includes(searchText) ||
       customerName?.toLowerCase().includes(searchText)
 
-    return dateMatch && typeMatch && accountMatch && searchMatch
+    return typeMatch && accountMatch && searchMatch
   })
 
   currentPage = 1
@@ -238,7 +252,7 @@ function applyFilters() {
   renderSales()
 }
 
-function clearFilters() {
+async function clearFilters() {
   const { setDateRange } = appStore.getState()
   const today = new Date()
   const thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000))
@@ -249,11 +263,18 @@ function clearFilters() {
     preset: 'last30days'
   })
   
-  document.querySelector('#filter-type').value = ''
-  document.querySelector('#filter-account').value = ''
-  document.querySelector('#filter-search').value = ''
+  const filterType = document.querySelector('#filter-type')
+  const filterAccount = document.querySelector('#filter-account')
+  const filterSearch = document.querySelector('#filter-search')
   
-  applyFilters()
+  if (filterType) filterType.value = ''
+  if (filterAccount) filterAccount.value = ''
+  if (filterSearch) filterSearch.value = ''
+  
+  // Reload data from server with new date range
+  currentPage = 1
+  expandedSales.clear()
+  await loadSales()
 }
 
 function renderSales() {
