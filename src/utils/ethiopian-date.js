@@ -46,11 +46,14 @@ export function fromEthiopian(year, month, day) {
  * e.g. "ሰኞ፣ ጥቅምት 15 ቀን 2016 ዓ.ም"
  */
 export function formatEthiopian(date, opts = {}) {
-  const { showDay = false, short = false } = opts
+  const { showDay = false, showWeekday = false, short = false } = opts
   const et = toEthiopian(date)
   const monthLabel = short ? ET_MONTHS_SHORT[et.month - 1] : ET_MONTHS[et.month - 1]
   const parts = []
-  if (showDay) parts.push(et.dayName + '፣')
+  
+  // Support both showDay (legacy) and showWeekday (new standard)
+  if (showDay || showWeekday) parts.push(et.dayName + '፣')
+  
   parts.push(monthLabel, `${et.day} ቀን`, `${et.year} ዓ.ም`)
   return parts.join(' ')
 }

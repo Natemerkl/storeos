@@ -17,12 +17,27 @@ export function setDateFormat(fmt) {
 /**
  * Format any date string or JS Date for display.
  * @param {string|Date} date
- * @param {{ short?: boolean, showDay?: boolean }} opts
+ * @param {{ short?: boolean, showDay?: boolean, showWeekday?: boolean }} opts
  * @returns {string}
  */
 export function formatDate(date, opts = {}) {
   if (!date) return '—'
-  const d = date instanceof Date ? date : new Date(date + 'T00:00:00')
+  
+  // Parse date correctly - handle both Date objects and ISO strings
+  let d
+  if (date instanceof Date) {
+    d = date
+  } else {
+    // For ISO date strings (YYYY-MM-DD), parse in local timezone
+    const dateStr = String(date)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const [year, month, day] = dateStr.split('-').map(Number)
+      d = new Date(year, month - 1, day)
+    } else {
+      d = new Date(dateStr)
+    }
+  }
+  
   if (isNaN(d)) return String(date)
 
   if (getDateFormat() === 'et') {
@@ -30,11 +45,17 @@ export function formatDate(date, opts = {}) {
   }
 
   // Gregorian
-  return d.toLocaleDateString('en-ET', {
+  const dateOpts = {
     year:  'numeric',
     month: opts.short ? 'short' : 'long',
     day:   'numeric',
-  })
+  }
+  
+  if (opts.showWeekday) {
+    dateOpts.weekday = opts.short ? 'short' : 'long'
+  }
+  
+  return d.toLocaleDateString('en-ET', dateOpts)
 }
 
 /**
@@ -52,12 +73,33 @@ export function formatDateShort(date) {
 }
 
 /**
+ * Format a date with weekday: "Monday, March 30, 2026" or "ሰኞ፣ ጥቅምት 15 ቀን 2016 ዓ.ም"
+ */
+export function formatDateWithWeekday(date) {
+  return formatDate(date, { showWeekday: true })
+}
+
+/**
  * Returns the Ethiopian year + month name for a given date, useful for headers.
  * In Gregorian mode returns "Month YYYY"
  */
 export function formatMonthYear(date) {
   if (!date) return '—'
-  const d = date instanceof Date ? date : new Date(date + 'T00:00:00')
+  
+  // Parse date correctly
+  let d
+  if (date instanceof Date) {
+    d = date
+  } else {
+    const dateStr = String(date)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const [year, month, day] = dateStr.split('-').map(Number)
+      d = new Date(year, month - 1, day)
+    } else {
+      d = new Date(dateStr)
+    }
+  }
+  
   if (getDateFormat() === 'et') {
     const et = toEthiopian(d)
     return `${et.monthName} ${et.year} ዓ.ም`
