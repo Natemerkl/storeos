@@ -21,12 +21,6 @@ export async function render(container) {
   const { currentStore, accountingView, stores } = appStore.getState()
   const storeIds = accountingView === 'joint' ? stores.map(s => s.id) : [currentStore?.id]
 
-  // Default date range - last 30 days
-  const today = new Date()
-  const thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000))
-  const defaultFrom = thirtyDaysAgo.toISOString().split('T')[0]
-  const defaultTo = today.toISOString().split('T')[0]
-
   // Load cash accounts
   const { data: accounts } = await supabase
     .from('cash_accounts')
@@ -148,12 +142,8 @@ async function loadSales() {
   console.log('Loading sales for store IDs:', storeIds)
   console.log('Date range:', dateRange)
 
-  // Ensure we have valid date range
-  const startDate = dateRange?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-  const endDate = dateRange?.endDate || new Date().toISOString().split('T')[0]
-
-  // Use the optimized single query with JSON aggregation
-  const { data: sales, error, count } = await supabase
+  // Build query - start with base query
+  let query = supabase
     .from('sales')
     .select(`
       id,
@@ -192,9 +182,17 @@ async function loadSales() {
       )
     `, { count: 'exact' })
     .in('store_id', storeIds)
-    .gte('created_at', `${startDate}T00:00:00Z`)
-    .lte('created_at', `${endDate}T23:59:59Z`)
-    .order('created_at', { ascending: false })
+
+  // Apply date range filters only if they exist
+  if (dateRange?.startDate) {
+    query = query.gte('created_at', `${dateRange.startDate}T00:00:00Z`)
+  }
+  if (dateRange?.endDate) {
+    query = query.lte('created_at', `${dateRange.endDate}T23:59:59Z`)
+  }
+
+  // Execute query
+  const { data: sales, error, count } = await query.order('created_at', { ascending: false })
 
   if (error) {
     console.error('Error loading sales:', error)
@@ -254,13 +252,12 @@ function applyFilters() {
 
 async function clearFilters() {
   const { setDateRange } = appStore.getState()
-  const today = new Date()
-  const thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000))
   
+  // Clear date range to show all time
   setDateRange({
-    startDate: thirtyDaysAgo.toISOString().split('T')[0],
-    endDate: today.toISOString().split('T')[0],
-    preset: 'last30days'
+    startDate: null,
+    endDate: null,
+    preset: 'alltime'
   })
   
   const filterType = document.querySelector('#filter-type')
@@ -271,7 +268,7 @@ async function clearFilters() {
   if (filterAccount) filterAccount.value = ''
   if (filterSearch) filterSearch.value = ''
   
-  // Reload data from server with new date range
+  // Reload data from server with no date range (all time)
   currentPage = 1
   expandedSales.clear()
   await loadSales()

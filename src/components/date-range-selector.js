@@ -2,6 +2,7 @@ import { appStore } from '../store.js'
 import { renderIcon } from './icons.js'
 
 const PRESETS = [
+  { value: 'alltime', label: 'All Time' },
   { value: 'today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'last7days', label: 'Last 7 Days' },
@@ -15,6 +16,9 @@ function calculateDateRange(preset) {
   const todayStr = today.toISOString().split('T')[0]
   
   switch (preset) {
+    case 'alltime':
+      return { startDate: null, endDate: null }
+    
     case 'today':
       return { startDate: todayStr, endDate: todayStr }
     
@@ -77,11 +81,11 @@ export function renderDateRangeSelector(container) {
         gap: 0.375rem;
       ">
         <input type="date" id="start-date" class="form-input" 
-          value="${dateRange.startDate}"
+          value="${dateRange.startDate || ''}"
           style="font-size: 0.75rem; padding: 0.375rem 0.5rem; max-width: 130px; border-radius: 6px;">
         <span style="color: var(--muted); font-size: 0.75rem;">→</span>
         <input type="date" id="end-date" class="form-input" 
-          value="${dateRange.endDate}"
+          value="${dateRange.endDate || ''}"
           style="font-size: 0.75rem; padding: 0.375rem 0.5rem; max-width: 130px; border-radius: 6px;">
       </div>
     </div>

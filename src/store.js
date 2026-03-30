@@ -11,9 +11,9 @@ export const appStore = createStore((set) => ({
   
   // Global date range for filtering across all pages
   dateRange: {
-    startDate: getTodayString(),
-    endDate: getTodayString(),
-    preset: 'today' // 'today' | 'yesterday' | 'last7days' | 'last30days' | 'thisMonth' | 'custom'
+    startDate: null,
+    endDate: null,
+    preset: 'alltime' // 'alltime' | 'today' | 'yesterday' | 'last7days' | 'last30days' | 'thisMonth' | 'custom'
   },
 
   setUser: (user) => set({ user }), 
