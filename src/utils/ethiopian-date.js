@@ -12,8 +12,8 @@ export const ET_MONTHS = [
 ]
 
 export const ET_MONTHS_SHORT = [
-  'መስከ', 'ጥቅምት', 'ኅዳር', 'ታኅሣ', 'ጥር', 'የካቲ',
-  'መጋቢ', 'ሚያዚ', 'ግንቦ', 'ሰኔ', 'ሐምሌ', 'ነሐሴ', 'ጳጉ'
+  'መስከረም', 'ጥቅምት', 'ኅዳር', 'ታኅሣሥ', 'ጥር', 'የካቲት',
+  'መጋቢት', 'ሚያዚያ', 'ግንቦት', 'ሰኔ', 'ሐምሌ', 'ነሐሴ', 'ጳጉሜ'
 ]
 
 const ET_DAYS = ['እሑድ', 'ሰኞ', 'ማክሰኞ', 'ረቡዕ', 'ሐሙስ', 'አርብ', 'ቅዳሜ']
@@ -24,9 +24,21 @@ const ET_DAYS = ['እሑድ', 'ሰኞ', 'ማክሰኞ', 'ረቡዕ', 'ሐሙስ'
  * @returns {{ year:number, month:number, day:number, monthName:string, dayName:string }}
  */
 export function toEthiopian(date) {
-  const d = date instanceof Date ? date : new Date(date)
+  let d
+  if (date instanceof Date) {
+    d = date
+  } else {
+    // Parse ISO date strings (YYYY-MM-DD) in local timezone to avoid UTC shift
+    const dateStr = String(date)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const [year, month, day] = dateStr.split('-').map(Number)
+      d = new Date(year, month - 1, day)
+    } else {
+      d = new Date(dateStr)
+    }
+  }
   const jdn = gregorianToJDN(d.getFullYear(), d.getMonth() + 1, d.getDate())
-  return jdnToEthiopian(jdn)
+  return jdnToEthiopian(jdn, d)
 }
 
 /**
@@ -61,20 +73,23 @@ export function formatEthiopian(date, opts = {}) {
 // ── Internal helpers ────────────────────────────────────────────
 
 function gregorianToJDN(y, m, d) {
-  return Math.floor((1461 * (y + 4800 + Math.floor((m - 14) / 12))) / 4)
-    + Math.floor((367 * (m - 2 - 12 * Math.floor((m - 14) / 12))) / 12)
-    - Math.floor((3 * Math.floor((y + 4900 + Math.floor((m - 14) / 12)) / 100)) / 4)
-    + d - 32075
+  const a = Math.floor((14 - m) / 12)
+  const y2 = y + 4800 - a
+  const m2 = m + 12 * a - 3
+  return d + Math.floor((153 * m2 + 2) / 5) + 365 * y2 + 
+         Math.floor(y2 / 4) - Math.floor(y2 / 100) + 
+         Math.floor(y2 / 400) - 32045
 }
 
-function jdnToEthiopian(jdn) {
+function jdnToEthiopian(jdn, originalDate) {
   const r = (jdn - 1723856) % 1461
   const n = r % 365 + 365 * Math.floor(r / 1460)
   const year = 4 * Math.floor((jdn - 1723856) / 1461) + Math.floor(r / 365) - Math.floor(r / 1460)
   const month = Math.floor(n / 30) + 1
   const day = n % 30 + 1
-  const jsDate = jdnToGregorian(jdn)
-  const dayName = ET_DAYS[jsDate.getDay()]
+  
+  // Use original date for weekday to avoid timezone issues
+  const dayName = ET_DAYS[originalDate.getDay()]
   return { year, month, day, monthName: ET_MONTHS[month - 1], dayName }
 }
 
