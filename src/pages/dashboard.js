@@ -344,7 +344,7 @@ function fillDashboard(container, data, isStale) {
     ${accounts.map(a => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border)">
         <div>
-          <div style="font-weight:500;font-size:13.5px">${a.name}</div>
+          <div style="font-weight:500;font-size:13.5px">${a.account_name}</div>
           <div style="font-size:11.5px;color:var(--muted)">
             ${a.account_type==='till'?'Till':'Bank'} · ${a.stores?.name??''}
           </div>

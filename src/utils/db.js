@@ -23,6 +23,24 @@ export async function getDashboardData(forceRefresh = false) {
     if (cached) return cached
   }
 
+  let salesQ         = supabase.from('sales').select('total_amount').in('store_id', ids)
+  let expensesQ      = supabase.from('expenses').select('amount').in('store_id', ids)
+  let recentSalesQ   = supabase.from('sales').select('id,total_amount,sale_date,created_at,payment_method').in('store_id', ids).order('created_at', { ascending: false }).limit(5)
+  let recentExpensesQ = supabase.from('expenses').select('id,amount,description,expense_date,created_at').in('store_id', ids).order('created_at', { ascending: false }).limit(5)
+
+  if (startDate) {
+    salesQ         = salesQ.gte('sale_date', startDate)
+    expensesQ      = expensesQ.gte('expense_date', startDate)
+    recentSalesQ   = recentSalesQ.gte('sale_date', startDate)
+    recentExpensesQ = recentExpensesQ.gte('expense_date', startDate)
+  }
+  if (endDate) {
+    salesQ         = salesQ.lte('sale_date', endDate)
+    expensesQ      = expensesQ.lte('expense_date', endDate)
+    recentSalesQ   = recentSalesQ.lte('sale_date', endDate)
+    recentExpensesQ = recentExpensesQ.lte('expense_date', endDate)
+  }
+
   const [
     { data: accounts },
     { data: sales },
@@ -31,12 +49,12 @@ export async function getDashboardData(forceRefresh = false) {
     { data: recentSales },
     { data: recentExpenses },
   ] = await Promise.all([
-    supabase.from('cash_accounts').select('id,account_name,account_type,balance').in('store_id', ids),
-    supabase.from('sales').select('total_amount').in('store_id', ids).gte('sale_date', startDate).lte('sale_date', endDate),
-    supabase.from('expenses').select('amount').in('store_id', ids).gte('expense_date', startDate).lte('expense_date', endDate),
+    supabase.from('cash_accounts').select('id,account_name,account_type,balance,stores(name)').in('store_id', ids),
+    salesQ,
+    expensesQ,
     supabase.from('inventory_items').select('item_name,quantity,total_quantity,low_stock_threshold,unit_cost,selling_price').in('store_id', ids),
-    supabase.from('sales').select('id,total_amount,sale_date,created_at,payment_method').in('store_id', ids).gte('sale_date', startDate).lte('sale_date', endDate).order('created_at', { ascending: false }).limit(5),
-    supabase.from('expenses').select('id,amount,description,expense_date,created_at').in('store_id', ids).gte('expense_date', startDate).lte('expense_date', endDate).order('created_at', { ascending: false }).limit(5),
+    recentSalesQ,
+    recentExpensesQ,
   ])
 
   const result = {
