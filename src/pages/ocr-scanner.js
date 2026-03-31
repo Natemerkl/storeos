@@ -246,7 +246,7 @@ export async function render(container) {
       if (ocrError) throw new Error(ocrError.message || 'OCR failed')
       if (ocrResult?.error) throw new Error(ocrResult.error)
 
-      const processFinalFlow = async (finalParsedData, finalLogId) => {
+      const processFinalFlow = async (finalParsedData, finalLogId, updatedTransport) => {
         showProgress('Preparing Smart Review...')
         if (!finalLogId && currentStore?.id) {
           const { data: logData, error: logError } = await supabase.from('ocr_logs').insert({
@@ -256,7 +256,7 @@ export async function render(container) {
             parsed_data: {
               ...finalParsedData,
               customer_header: ocrResult.customer_header || null,
-              transport:       ocrResult.transport       || null,
+              transport:       updatedTransport || ocrResult.transport || null,
               payment_bank:    ocrResult.payment_bank    || null,
               validation:      ocrResult.validation      || null,
             },
@@ -311,7 +311,7 @@ export async function render(container) {
                   worker_note: finalResult.transport?.worker_note || ''
                 }
               }
-              await processFinalFlow(finalResult.parsed_data || parsedData, logId)
+              await processFinalFlow(finalResult.parsed_data || parsedData, logId, finalResult.transport)
             } catch (err) {
               console.error(err)
               showToast('Correction failed: ' + err.message, 'error')
@@ -326,7 +326,7 @@ export async function render(container) {
           }
         })
       } else {
-        await processFinalFlow(parsedData, logId)
+        await processFinalFlow(parsedData, logId, ocrResult.transport)
       }
 
     } catch(err) {
