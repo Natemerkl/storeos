@@ -195,64 +195,51 @@ const CUSTOMER_LABEL_KEYWORDS = ["name", "targ", "place", "nom", "customer", "cl
 function extractCustomerHeader(rows: Row[]): {
   name: string | null; targa: string | null; place: string | null
 } {
-  // STRICT RULE: Only look for the header in the top 4 rows
-  const topRows = rows.slice(0, Math.min(4, rows.length))
-
-  // Strategy 1: Find label row ("Name targ Place") then look ahead up to 5 rows
-  for (let i = 0; i < topRows.length - 1; i++) {
-    const lower = topRows[i].text.toLowerCase()
-    const labelHits = CUSTOMER_LABEL_KEYWORDS.filter(kw => lower.includes(kw)).length
-    if (labelHits >= 2) {
-      for (let j = i + 1; j <= Math.min(i + 5, topRows.length - 1); j++) {
-        const tokens = topRows[j].words.map(w => w.text)
-        const targaIdx = tokens.findIndex(t => /^\d{4,6}$/.test(t))
-        if (targaIdx > 0) {
-          return {
-            name:  tokens.slice(0, targaIdx).join(" ").trim() || null,
-            targa: tokens[targaIdx],
-            place: tokens.slice(targaIdx + 1).join(" ").trim() || null,
-          }
-        }
-      }
+  // 1. First, find where the actual line items start so we don't accidentally grab them
+  let firstDataRowIdx = rows.length
+  for (let i = 0; i < rows.length; i++) {
+    // If a row has 2 or more numbers, it's definitely a line item, stop searching!
+    const numCount = rows[i].words.filter(w => isNumeric(w.text)).length
+    if (numCount >= 2) {
+      firstDataRowIdx = i
+      break
     }
   }
 
-  // Strategy 2: Find any row matching [text+] [4-6 digit targa] [text+] with exactly 1 numeric
-  // This handles OCR misreads of the label row and non-standard receipt layouts
-  for (const row of topRows) {
-    const tokens  = row.words.map(w => w.text)
-    const lower   = row.text.toLowerCase()
-    
-    // Explicitly reject if this row has 2 or more numbers (it's a line item)
-    const numericTokens = tokens.filter(t => isNumeric(t))
-    if (numericTokens.length >= 2) continue
-    
-    // Must not be an item header row
-    if (ITEM_HEADER_KEYWORDS.filter(kw => lower.includes(kw)).length >= 2) continue
-    // Must not be a skip-keyword row
-    if (ITEM_SKIP_KEYWORDS.some(kw => lower.includes(kw))) continue
+  // 2. Isolate the "Header Zone" (max the top 4 rows, but strictly BEFORE the line items)
+  const headerRows = rows.slice(0, Math.min(4, firstDataRowIdx))
 
-    const textTokens = tokens.filter(t => !isNumeric(t))
+  // 3. Pool EVERY single word from the header zone into one flat array left-to-right, top-to-bottom
+  const headerTokens = headerRows.flatMap(r => r.words.map(w => w.text))
 
-    // Pattern: exactly 1 numeric (the targa) and at least 1 text word
-    if (numericTokens.length === 1 && textTokens.length >= 1) {
-      const targaIdx = tokens.findIndex(t => /^\d{4,6}$/.test(t))
-      
-      if (targaIdx >= 0) {
-        const beforeTarga = tokens.slice(0, targaIdx).join(" ").trim()
-        const afterTarga = tokens.slice(targaIdx + 1).join(" ").trim()
-        
-        return {
-          // If there's text before, it's the name. If only text after, use that.
-          name: beforeTarga || afterTarga || null,
-          targa: tokens[targaIdx],
-          // Only assign a place if there is text on BOTH sides
-          place: (beforeTarga && afterTarga) ? afterTarga : null,
-        }
-      }
+  // 4. Scan the pool to find the Targa
+  let targaIdx = -1
+  let cleanTarga = ""
+  
+  for (let i = 0; i < headerTokens.length; i++) {
+    // Clean trailing squiggles or dots from handwriting before testing
+    const cleanStr = headerTokens[i].trim().replace(/[\>\)\.\-\_]+$/, '')
+    
+    // If it's exactly 4 to 6 digits, we found our Targa!
+    if (/^\d{4,6}$/.test(cleanStr)) {
+      targaIdx = i
+      cleanTarga = cleanStr
+      break
     }
   }
 
+  // 5. If we found a Targa, slice the pool
+  if (targaIdx >= 0) {
+    // Everything written BEFORE the Targa is the Customer Name
+    const name = headerTokens.slice(0, targaIdx).join(" ").trim() || null
+    
+    // Everything written AFTER the Targa is the Place
+    const place = headerTokens.slice(targaIdx + 1).join(" ").trim() || null
+
+    return { name, targa: cleanTarga, place }
+  }
+
+  // Fallback if absolutely no 4-6 digit number was found at the top of the page
   return { name: null, targa: null, place: null }
 }
 
