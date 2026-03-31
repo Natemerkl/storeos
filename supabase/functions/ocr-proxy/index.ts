@@ -234,14 +234,20 @@ function extractCustomerHeader(rows: Row[]): {
 
     const textTokens = tokens.filter(t => !isNumeric(t))
 
-    // Pattern: exactly 1 numeric (the targa) flanked by text on both sides
-    if (numericTokens.length === 1 && textTokens.length >= 2) {
+    // Pattern: exactly 1 numeric (the targa) and at least 1 text word
+    if (numericTokens.length === 1 && textTokens.length >= 1) {
       const targaIdx = tokens.findIndex(t => /^\d{4,6}$/.test(t))
-      if (targaIdx > 0 && targaIdx < tokens.length - 1) {
+      
+      if (targaIdx >= 0) {
+        const beforeTarga = tokens.slice(0, targaIdx).join(" ").trim()
+        const afterTarga = tokens.slice(targaIdx + 1).join(" ").trim()
+        
         return {
-          name:  tokens.slice(0, targaIdx).join(" ").trim() || null,
+          // If there's text before, it's the name. If only text after, use that.
+          name: beforeTarga || afterTarga || null,
           targa: tokens[targaIdx],
-          place: tokens.slice(targaIdx + 1).join(" ").trim() || null,
+          // Only assign a place if there is text on BOTH sides
+          place: (beforeTarga && afterTarga) ? afterTarga : null,
         }
       }
     }
@@ -283,46 +289,51 @@ function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
     // Skip summary / transport / header rows
     if (ITEM_SKIP_KEYWORDS.some(kw => lower.includes(kw))) continue
 
-    // Collect numeric and text tokens
-    const numericTokens: Array<{ value: number; idx: number }> = []
-    const leadingText: string[] = []
-    let seenNumber = false
-
+    // Completely separate text and numbers first
+    const numericTokens: number[] = []
+    const textTokens: string[] = []
+    
     for (let t = 0; t < tokens.length; t++) {
       if (isNumeric(tokens[t])) {
-        seenNumber = true
-        numericTokens.push({ value: parseAmount(tokens[t]), idx: t })
-      } else if (!seenNumber) {
-        leadingText.push(tokens[t])
+        numericTokens.push(parseAmount(tokens[t]))
+      } else {
+        textTokens.push(tokens[t])
       }
     }
 
     // Need at least 2 numerics to qualify as a line item
     if (numericTokens.length < 2) continue
 
-    let description: string
-    let quantity: number
-    let unit_price: number
-    let total: number
+    // All text automatically becomes the description/name
+    // This perfectly handles multi-word names like "Desta Bane" or "200k"
+    let description = textTokens.join(" ").trim()
+    let quantity = 1
+    let unit_price = 0
+    let total = 0
 
     if (manualColumnOrder && manualColumnOrder.length > 0) {
-      // Use user-corrected column assignments
-      const assigned: Record<string, string> = {}
-      tokens.forEach((t, idx) => {
-        const colType = manualColumnOrder[idx]
-        if (colType && colType !== "ignore") assigned[colType] = t
-      })
-      description = assigned["name"] || assigned["description"] || leadingText.join(" ")
-      quantity    = parseAmount(assigned["qty"] || assigned["quantity"] || "1")
-      unit_price  = parseAmount(assigned["price"] || assigned["unit_price"] || "0")
-      total       = parseAmount(assigned["amount"] || assigned["total"] || "0")
-    } else {
-      description = leadingText.join(" ").trim()
+      // Filter the user's mapping to ONLY look at the number columns they expect
+      const expectedNumberCols = manualColumnOrder.filter(c => 
+        c === "qty" || c === "quantity" || 
+        c === "price" || c === "unit_price" || 
+        c === "amount" || c === "total"
+      )
 
+      // Map the actual numbers found to the expected number columns, in order
+      for (let j = 0; j < Math.min(numericTokens.length, expectedNumberCols.length); j++) {
+        const val = numericTokens[j]
+        const colType = expectedNumberCols[j]
+        
+        if (colType === "qty" || colType === "quantity") quantity = val
+        if (colType === "price" || colType === "unit_price") unit_price = val
+        if (colType === "amount" || colType === "total") total = val
+      }
+    } else {
+      // Automatic mode: use text/number separation
       if (numericTokens.length >= 3) {
-        const n0 = numericTokens[0].value
-        const n1 = numericTokens[1].value
-        const n2 = numericTokens[numericTokens.length - 1].value
+        const n0 = numericTokens[0]
+        const n1 = numericTokens[1]
+        const n2 = numericTokens[numericTokens.length - 1]
 
         // Cross-check: qty × price ≈ total  (within 5% rounding tolerance)
         const crossCheck = (q: number, p: number, tot: number) =>
@@ -339,8 +350,8 @@ function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
       } else {
         // 2 numbers: assume [price, total] with qty = 1
         quantity   = 1
-        unit_price = numericTokens[0].value
-        total      = numericTokens[1].value
+        unit_price = numericTokens[0]
+        total      = numericTokens[1]
       }
     }
 
