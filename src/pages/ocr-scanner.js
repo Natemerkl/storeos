@@ -289,7 +289,7 @@ export async function render(container) {
           rawText:        ocrResult.raw_text,
           customerHeader: ocrResult.customer_header || {},
           transport:      ocrResult.transport || null,
-          onSave: async (orderedTypes, confirmedHeader) => {
+          onSave: async (orderedTypes, confirmedHeader, manualTransportFee) => {
             showProgress('Re-processing with corrected columns...')
             try {
               const { data: finalResult, error: finalError } = await supabase.functions.invoke('ocr-proxy', {
@@ -302,6 +302,15 @@ export async function render(container) {
               if (finalError) throw new Error(finalError.message)
               if (finalResult?.error) throw new Error(finalResult.error)
               if (confirmedHeader) finalResult.customer_header = confirmedHeader
+              // Merge manual transport fee override
+              if (manualTransportFee > 0) {
+                finalResult.transport = {
+                  ...finalResult.transport,
+                  amount: manualTransportFee,
+                  detected: true,
+                  worker_note: finalResult.transport?.worker_note || ''
+                }
+              }
               await processFinalFlow(finalResult.parsed_data || parsedData, logId)
             } catch (err) {
               console.error(err)

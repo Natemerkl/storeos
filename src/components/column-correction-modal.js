@@ -24,6 +24,7 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan,
   let custName  = customerHeader.name  || ''
   let custTarga = customerHeader.targa || ''
   let custPlace = customerHeader.place || ''
+  let manualTransportFee = 0
 
   function renderList() {
     return items.map((col) => `
@@ -264,7 +265,13 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan,
               🚚 Transport fee detected: ${transport.amount ? Number(transport.amount).toLocaleString('en-ET') + ' ETB' : ''}
               &nbsp;— configure it in the next screen.
             </div>
-          ` : ''}
+          ` : `
+            <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:0.625rem 0.75rem;margin-bottom:0.625rem">
+              <div style="font-size:0.6875rem;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:0.375rem">🚚 Transport / Labor Fee (Optional)</div>
+              <input type="number" id="ccm-transport-fee" min="0" placeholder="e.g. 1500" style="width:100%;padding:0.4rem 0.5rem;border:1px solid #FCD34D;border-radius:6px;font-size:0.875rem;font-weight:600;background:#fff">
+              <div style="font-size:0.75rem;color:#92400E;margin-top:0.25rem">Leave blank if none</div>
+            </div>
+          `}
 
           <div id="col-list-container">
             ${renderList()}
@@ -312,6 +319,14 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan,
 
   attachListEvents();
 
+  // Transport fee input handler
+  const transportInput = overlay.querySelector('#ccm-transport-fee');
+  if (transportInput) {
+    transportInput.addEventListener('input', (e) => {
+      manualTransportFee = parseFloat(e.target.value) || 0;
+    });
+  }
+
   // Controls
   overlay.querySelector('#btn-col-save').addEventListener('click', () => {
     if (items.length === 0) {
@@ -326,7 +341,7 @@ export function openColumnCorrectionModal({ imageUrl, columns, onSave, onRescan,
     });
     document.body.style.overflow = _prevOverflow;
     overlay.remove();
-    if (onSave) onSave(manualTypes, { name: custName || null, targa: custTarga || null, place: custPlace || null });
+    if (onSave) onSave(manualTypes, { name: custName || null, targa: custTarga || null, place: custPlace || null }, manualTransportFee);
   });
 
   overlay.querySelector('#btn-col-rescan').addEventListener('click', () => {

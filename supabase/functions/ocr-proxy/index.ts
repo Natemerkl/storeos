@@ -343,8 +343,9 @@ function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
 // ── Step 4: Transport / Wezader extraction ────────────────────────────────────
 
 const TRANSPORT_KEYWORDS = [
-  "wezader", "wezader", "transport", "delivery", "driver",
-  "ወዘደር", "ዊዘደር", "ወዘደር", "wezader", "wezider",
+  "wezader", "wezider", "wezder", "wzder", "weyder", "wez", "pudhal",
+  "transport", "delivery", "driver", "labor",
+  "ወዘደር", "ዊዘደር",
 ]
 
 function extractTransport(rows: Row[]): {
