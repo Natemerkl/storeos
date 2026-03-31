@@ -84,21 +84,30 @@ function parseAmount(s: string): number {
 
 // Is a token a pure number (with optional Ethiopian thousands comma)?
 function isNumeric(s: string): boolean {
-  return /^[\d,]+(\.\d+)?$/.test(s.trim())
+  // Strip trailing punctuation/artifacts common in handwritten numbers before testing
+  const clean = s.trim().replace(/[>)\.\-_]+$/, '')
+  return /^[\d,]+(\.\d+)?$/.test(clean) && clean.length > 0
 }
 
 // ── Step 1: Spatial row reconstruction ───────────────────────────────────────
 // Groups Vision API word tokens by Y-coordinate proximity into rows,
 // then sorts words within each row by X (left → right).
 
-function groupIntoRows(wordAnnotations: any[], yTolerance = 15): Row[] {
+function groupIntoRows(wordAnnotations: any[], yTolerance = 35): Row[] {
   const tokens: WordToken[] = wordAnnotations
     .filter(w => w.description && w.boundingPoly?.vertices?.length >= 4)
-    .map(w => ({
-      text: w.description as string,
-      x: (w.boundingPoly.vertices[0].x as number) || 0,
-      y: (w.boundingPoly.vertices[0].y as number) || 0,
-    }))
+    .map(w => {
+      const vertices = w.boundingPoly.vertices
+      // Use center-Y of the bounding box instead of top-left corner
+      // to handle tall capitals and slanted handwriting more robustly
+      const ys = vertices.map((v: any) => v.y || 0)
+      const centerY = (Math.min(...ys) + Math.max(...ys)) / 2
+      return {
+        text: w.description as string,
+        x: (vertices[0].x as number) || 0,
+        y: centerY,
+      }
+    })
     .sort((a, b) => a.y - b.y)
 
   const rows: Row[] = []
@@ -107,6 +116,8 @@ function groupIntoRows(wordAnnotations: any[], yTolerance = 15): Row[] {
     const existing = rows.find(r => Math.abs(r.y - token.y) <= yTolerance)
     if (existing) {
       existing.words.push(token)
+      // Recalculate row average Y to track slant drift across the line
+      existing.y = existing.words.reduce((s, w) => s + w.y, 0) / existing.words.length
     } else {
       rows.push({ y: token.y, words: [token], text: "" })
     }
@@ -126,7 +137,7 @@ function groupIntoRows(wordAnnotations: any[], yTolerance = 15): Row[] {
 // Handwritten receipts often place price/total columns slightly lower on the page
 // than the product name, causing the spatial grouper to split one item across two rows.
 // e.g. ["Klonze", "10"] row + ["3500", "35,000"] row → ["Klonze", "10", "3500", "35,000"]
-function mergeOrphanNumericRows(rows: Row[], maxYGap = 35): Row[] {
+function mergeOrphanNumericRows(rows: Row[], maxYGap = 65): Row[] {
   const result: Row[] = []
 
   for (let i = 0; i < rows.length; i++) {
@@ -134,11 +145,17 @@ function mergeOrphanNumericRows(rows: Row[], maxYGap = 35): Row[] {
     const allNumeric = row.words.length > 0 && row.words.every(w => isNumeric(w.text))
 
     if (allNumeric && result.length > 0) {
-      const prev     = result[result.length - 1]
-      const yDiff    = Math.abs(row.y - prev.y)
-      const prevNums = prev.words.filter(w => isNumeric(w.text)).length
-      // Merge if within Y gap OR if the preceding row has < 2 numerics (incomplete item row)
-      if (yDiff <= maxYGap || prevNums < 2) {
+      const prev      = result[result.length - 1]
+      const yDiff     = Math.abs(row.y - prev.y)
+      const prevNums  = prev.words.filter(w => isNumeric(w.text)).length
+      // Guard: never merge into a customer/targa row.
+      // A targa row has exactly 1 numeric (4-6 digits) flanked by text on both sides.
+      const prevOnlyNum = prev.words.filter(w => isNumeric(w.text))
+      const isTargaRow  = prevNums === 1 &&
+        /^\d{4,6}$/.test(prevOnlyNum[0]?.text || "") &&
+        !isNumeric(prev.words[0]?.text || "") &&
+        !isNumeric(prev.words[prev.words.length - 1]?.text || "")
+      if (!isTargaRow && (yDiff <= maxYGap || prevNums < 2)) {
         prev.words = [...prev.words, ...row.words].sort((a, b) => a.x - b.x)
         prev.text  = prev.words.map(w => w.text).join(" ")
         continue
@@ -391,29 +408,32 @@ function extractPaymentBank(rows: Row[]): string | null {
 // ── Step 6: Column detection for correction modal ────────────────────────────
 
 function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any[] } {
-  // Scan forward from the header row looking for the first genuine item data row:
-  // must have ≥2 numeric tokens and must not match skip keywords (transport, totals, etc.)
+  // Scan the next 5 data rows and pick the one with the most tokens
+  // (avoids picking an anomalous fractured row as the column template)
   const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0
-  let firstDataRow: Row | undefined
+  let bestRow: Row | undefined
+  let maxTokens = 0
 
-  for (let i = startIdx; i < rows.length; i++) {
+  for (let i = startIdx; i < Math.min(startIdx + 5, rows.length); i++) {
     const row   = rows[i]
     const lower = row.text.toLowerCase()
     if (ITEM_SKIP_KEYWORDS.some(kw => lower.includes(kw))) continue
-    if (row.words.filter(w => isNumeric(w.text)).length >= 2) {
-      firstDataRow = row
-      break
+    const numCount = row.words.filter(w => isNumeric(w.text)).length
+    if (numCount >= 2 && row.words.length > maxTokens) {
+      bestRow = row
+      maxTokens = row.words.length
     }
   }
 
   // Fallback: any row with ≥2 numerics anywhere in the document
-  if (!firstDataRow) {
-    firstDataRow = rows.find(r => r.words.filter(w => isNumeric(w.text)).length >= 2)
+  if (!bestRow) {
+    const candidates = rows.filter(r => r.words.filter(w => isNumeric(w.text)).length >= 2)
+    bestRow = candidates.reduce((best, r) => (!best || r.words.length > best.words.length) ? r : best, undefined as Row | undefined)
   }
 
-  if (!firstDataRow) return { columns: [] }
+  if (!bestRow) return { columns: [] }
 
-  const tokens = firstDataRow.words.map(w => w.text)
+  const tokens = bestRow.words.map(w => w.text)
   const columns: any[] = []
   let nameAdded    = false
   let numericCount = 0
