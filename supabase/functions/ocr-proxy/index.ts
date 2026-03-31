@@ -94,8 +94,13 @@ function isNumeric(s: string): boolean {
 // then sorts words within each row by X (left → right).
 
 function groupIntoRows(wordAnnotations: any[], yTolerance = 35): Row[] {
+  // Helper to detect if a word is just pure noise/punctuation
+  const isNoise = (text: string) => /^[\-\_\.\,\:\;\>\<\~]+$/.test(text.trim())
+
   const tokens: WordToken[] = wordAnnotations
     .filter(w => w.description && w.boundingPoly?.vertices?.length >= 4)
+    // Filter out the noise tokens right away!
+    .filter(w => !isNoise(w.description as string))
     .map(w => {
       const vertices = w.boundingPoly.vertices
       // Use center-Y of the bounding box instead of top-left corner
@@ -190,13 +195,16 @@ const CUSTOMER_LABEL_KEYWORDS = ["name", "targ", "place", "nom", "customer", "cl
 function extractCustomerHeader(rows: Row[]): {
   name: string | null; targa: string | null; place: string | null
 } {
+  // STRICT RULE: Only look for the header in the top 4 rows
+  const topRows = rows.slice(0, Math.min(4, rows.length))
+
   // Strategy 1: Find label row ("Name targ Place") then look ahead up to 5 rows
-  for (let i = 0; i < rows.length - 1; i++) {
-    const lower = rows[i].text.toLowerCase()
+  for (let i = 0; i < topRows.length - 1; i++) {
+    const lower = topRows[i].text.toLowerCase()
     const labelHits = CUSTOMER_LABEL_KEYWORDS.filter(kw => lower.includes(kw)).length
     if (labelHits >= 2) {
-      for (let j = i + 1; j <= Math.min(i + 5, rows.length - 1); j++) {
-        const tokens = rows[j].words.map(w => w.text)
+      for (let j = i + 1; j <= Math.min(i + 5, topRows.length - 1); j++) {
+        const tokens = topRows[j].words.map(w => w.text)
         const targaIdx = tokens.findIndex(t => /^\d{4,6}$/.test(t))
         if (targaIdx > 0) {
           return {
@@ -211,16 +219,20 @@ function extractCustomerHeader(rows: Row[]): {
 
   // Strategy 2: Find any row matching [text+] [4-6 digit targa] [text+] with exactly 1 numeric
   // This handles OCR misreads of the label row and non-standard receipt layouts
-  for (const row of rows) {
+  for (const row of topRows) {
     const tokens  = row.words.map(w => w.text)
     const lower   = row.text.toLowerCase()
+    
+    // Explicitly reject if this row has 2 or more numbers (it's a line item)
+    const numericTokens = tokens.filter(t => isNumeric(t))
+    if (numericTokens.length >= 2) continue
+    
     // Must not be an item header row
     if (ITEM_HEADER_KEYWORDS.filter(kw => lower.includes(kw)).length >= 2) continue
     // Must not be a skip-keyword row
     if (ITEM_SKIP_KEYWORDS.some(kw => lower.includes(kw))) continue
 
-    const numericTokens = tokens.filter(t => isNumeric(t))
-    const textTokens    = tokens.filter(t => !isNumeric(t))
+    const textTokens = tokens.filter(t => !isNumeric(t))
 
     // Pattern: exactly 1 numeric (the targa) flanked by text on both sides
     if (numericTokens.length === 1 && textTokens.length >= 2) {
