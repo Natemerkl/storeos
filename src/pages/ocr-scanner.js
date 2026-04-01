@@ -405,10 +405,14 @@ export async function render(container) {
       if (ocrError) throw new Error(ocrError.message || 'OCR failed')
       if (ocrResult?.error) throw new Error(ocrResult.error)
 
+      console.log('[DEBUG] Raw Edge Function Response:', ocrResult)
+
       // 5. Route based on mode and result flags
       if (isPro) {
         // Pro Mode: skip column correction, go straight to smart modal
-        await processFinalFlow(enrichOcrResult(ocrResult.parsed_data, ocrResult), ocrResult.id, publicUrl)
+        const enrichedPro = enrichOcrResult(ocrResult.parsed_data, ocrResult)
+        console.log('[DEBUG] Enriched parsed_data going to DB:', enrichedPro)
+        await processFinalFlow(enrichedPro, ocrResult.id, publicUrl)
       } else {
         // Standard Mode: check if column correction is needed
         const parsedData = ocrResult?.parsed_data || { line_items: [] }

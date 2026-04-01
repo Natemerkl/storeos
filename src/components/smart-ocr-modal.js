@@ -45,26 +45,35 @@ export async function openSmartOCRModal(logId) {
   const rawItems = log.parsed_data?.line_items || []
 
   let items = rawItems.map(i => {
-    const qty = Number(i.quantity) || 1
+    const qty     = Number(i.quantity)  || 1
+    const aiPrice = Number(i.unit_price)   // keep 0 distinct from null
+    const aiTotal = Number(i.total)
 
     // Price priority: unit_price â†’ back-calculate from total
-    let unitPrice = null
-    if (Number(i.unit_price) > 0) {
-      unitPrice = Number(i.unit_price)
-    } else if (Number(i.total) > 0) {
-      unitPrice = Number(i.total) / qty
+    const price = aiPrice > 0
+      ? aiPrice
+      : (aiTotal > 0 ? aiTotal / qty : null)
+
+    // Preserve AI total exactly -- never discard what Gemini computed
+    const total = aiTotal > 0
+      ? aiTotal
+      : (price != null ? qty * price : null)
+
+    // Use matched_product_id from Gemini first; only fuzzy-match if absent
+    let matched = null
+    if (i.matched_product_id && inventoryItems?.length) {
+      matched = inventoryItems.find(ii => ii.id === i.matched_product_id) || null
+    }
+    if (!matched && inventoryItems?.length) {
+      matched = fuzzyMatch(i.description, inventoryItems, { key: 'item_name', threshold: 0.6, limit: 1 })[0] || null
     }
 
-    const matched = inventoryItems?.length
-      ? fuzzyMatch(i.description, inventoryItems, { key: 'item_name', threshold: 0.6, limit: 1 })[0]
-      : null
-
     return {
-      name:    i.description || '',
-      qty:     qty,
-      price:   unitPrice,
-      total:   unitPrice != null ? qty * unitPrice : null,
-      matched: matched || null,
+      name: i.description || '',
+      qty,
+      price,
+      total,
+      matched,
     }
   })
 
@@ -96,7 +105,7 @@ export async function openSmartOCRModal(logId) {
   const matchedCustomer   = (customers||[]).find(c =>
     custName && c.name.toLowerCase() === custName.toLowerCase()) || null
 
-  let transportAmt        = Number(transport?.amount) || 0
+  let transportAmt        = Number(transport?.amount) || Number(log.parsed_data?.transport_fee) || 0
   let transportWorker     = transport?.worker_note    || ''
   let transportPaidNow    = !!(transport?.detected)
   let transportChargeCust = false
@@ -381,7 +390,7 @@ export async function openSmartOCRModal(logId) {
   function rowHtml(item, i) {
     const qty   = Number(item.qty)   || 1
     const price = Number(item.price) || 0
-    const total = qty * price
+    const total = Number(item.total) || (qty * price)  // prefer stored AI total over recalculation
     return `
       <div data-row="${i}" style="
         background:var(--bg-subtle);border:1px solid var(--border);
