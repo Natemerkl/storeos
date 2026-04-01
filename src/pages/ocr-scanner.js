@@ -407,6 +407,11 @@ export async function render(container) {
 
       console.log('[DEBUG] Raw Edge Function Response:', ocrResult)
 
+      // Warn if Pro scan fell back to Vision (GEMINI_API_KEY missing or Gemini error)
+      if (ocrResult?.parsed_data?.fallback_from_pro) {
+        showToast('⚠️ Pro scan fell back to Standard mode — check that GEMINI_API_KEY is set in Supabase secrets.', 'warning')
+      }
+
       // 5. Route based on mode and result flags
       if (isPro) {
         // Pro Mode: skip column correction, go straight to smart modal

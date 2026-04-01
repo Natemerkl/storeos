@@ -93,7 +93,7 @@ function isNumeric(s: string): boolean {
 // Groups Vision API word tokens by Y-coordinate proximity into rows,
 // then sorts words within each row by X (left → right).
 
-function groupIntoRows(wordAnnotations: any[], yTolerance = 35): Row[] {
+function groupIntoRows(wordAnnotations: any[], yTolerance = 45): Row[] {
   // Helper to detect if a word is just pure noise/punctuation
   const isNoise = (text: string) => /^[\-\_\.\,\:\;\>\<\~]+$/.test(text.trim())
 
@@ -249,8 +249,14 @@ function extractCustomerHeader(rows: Row[]): {
 // Validates column order with: qty × price ≈ total cross-check.
 
 const ITEM_HEADER_KEYWORDS = ["item", "quantity", "price", "total", "qty", "amount", "product", "description"]
-const ITEM_SKIP_KEYWORDS   = ["wezader", "wezader", "transport", "total", "grand", "subtotal", "sum",
-                               "name", "targ", "place", "delivery", "ወዘደር"]
+const ITEM_SKIP_KEYWORDS   = [
+  "wezader", "wezider", "wezder", "wzder", "weyder",
+  "terezeder", "terezder", "tewezeder", "tewezder", "terezdr",
+  "transport", "delivery", "driver", "labor",
+  "total", "grand", "subtotal", "sum",
+  "name", "targ", "place",
+  "ወዘደር", "ዊዘደር",
+]
 
 function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
   items: any[]; headerRowIdx: number
@@ -354,6 +360,7 @@ function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
 
 const TRANSPORT_KEYWORDS = [
   "wezader", "wezider", "wezder", "wzder", "weyder", "wez", "pudhal",
+  "terezeder", "terezder", "tewezeder", "tewezder", "terezdr",
   "transport", "delivery", "driver", "labor",
   "ወዘደር", "ዊዘደር",
 ]
