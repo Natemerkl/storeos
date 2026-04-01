@@ -569,6 +569,69 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+// ── Gemini structured output schema ──────────────────────────
+const GeminiSystemPrompt = (userCtx: { products: any[], customers: any[] }) => `
+You are an expert Ethiopian bookkeeping assistant. Extract data from this handwritten receipt into a strict JSON object.
+
+CONTEXT - Use these lists to correct messy handwriting:
+KNOWN PRODUCTS: ${JSON.stringify(userCtx.products.slice(0, 100), null, 0)}
+KNOWN CUSTOMERS: ${JSON.stringify(userCtx.customers.slice(0, 40), null, 0)}
+
+--- CRITICAL MASTER TEMPLATE ---
+This receipt follows a STRICT 4-column format. You must read left-to-right across the massive gaps. 
+
+EXAMPLE OF THE EXACT RECEIPT FORMAT YOU ARE LOOKING AT:
+Image Text:
+Aymen       Biretene        14563
+Klenze      15      4350  - 65,250
+200k        10      5000  - 50,000
+Qemeni      10      2300    23,000
+DestaBane   7       1500    10,500
+           tewezeder 500
+Total - 149,250
+
+CORRECT EXTRACTION FOR THIS EXAMPLE:
+- Header -> Name: "Aymen", Place: "Biretene", Targa: "14563"
+- Line 1 -> desc: "Klenze", qty: 15, unit_price: 4350, total: 65250
+- Line 2 -> desc: "200k", qty: 10, unit_price: 5000, total: 50000
+- Line 3 -> desc: "Qemeni", qty: 10, unit_price: 2300, total: 23000
+- Line 4 -> desc: "DestaBane", qty: 7, unit_price: 1500, total: 10500
+- Transport -> amount: 500, worker_note: "tewezeder"
+- Grand Total -> 149250
+--------------------------------
+
+RULES YOU MUST FOLLOW:
+1. NEVER split a single row into multiple items. A product row ALWAYS has 4 parts: [Product Name] [Quantity] [Unit Price] [Total].
+2. If you see a number like "1500" sitting alone, it is a PRICE or a TOTAL. It is NEVER a product name.
+3. Words like "tewezeder", "wezader", "terezeder", "labor", or "transport" are TRANSPORT FEES. Put their amount ONLY in the "transport_fee" field. NEVER put them in the line_items array.
+4. MATH ANCHOR: Quantity * Unit Price MUST exactly equal Total.
+
+You MUST return a valid JSON object with these exact keys:
+{
+  "_step_1_raw_transcription": "Transcribe the receipt line-by-line exactly as written.",
+  "vendor": "vendor name or empty string",
+  "date": "YYYY-MM-DD or empty string",
+  "total": <total amount as a number, 0 if not found>,
+  "subtotal": <subtotal before fees, 0 if unknown>,
+  "transport_fee": <transport/delivery/wezader fee amount, 0 if none>,
+  "line_items": [
+    {
+      "description": "product name",
+      "matched_product_id": "id from known products if matched, null if not",
+      "matched_product_name": "corrected product name if matched, null if not",
+      "quantity": <number>,
+      "unit_price": <price per unit>,
+      "total": <quantity * unit_price>
+    }
+  ],
+  "customer_name": "customer name if found, null if not",
+  "matched_customer_id": "id from known customers if matched, null if not",
+  "payment_method": "cash | credit | bank_transfer | telebirr | cbe_birr | null",
+  "notes": "put the targa/plate number or place here if found",
+  "scan_mode": "pro"
+}
+`
+
 async function callGeminiProScan(
   imageUrl: string,
   userContext: { products: any[]; customers: any[] },
@@ -581,59 +644,10 @@ async function callGeminiProScan(
   const b64 = uint8ToBase64(new Uint8Array(buf))
   const mimeType = imageUrl.toLowerCase().includes('.pdf') ? 'application/pdf' : 'image/webp'
 
-  // 2. Build context strings (capped to stay within token budget)
-  const prodCtx = userContext.products.length
-    ? userContext.products.slice(0, 100).map((p: any) => `• ${p.name} (price: ${p.price})`).join('\n')
-    : 'None'
-  const custCtx = userContext.customers.length
-    ? userContext.customers.slice(0, 50).map((c: any) => c.name).join(', ')
-    : 'None'
+  // 2. Build prompt using the strictly templated schema with few-shot example
+  const prompt = GeminiSystemPrompt(userContext)
 
-  // 3. Two-step CoT prompt — plain-text response so CoT is NOT suppressed
-  const prompt = `You are an expert OCR system for Ethiopian handwritten sales receipts.
-
-## STORE CONTEXT
-Known products:
-${prodCtx}
-
-Known customers: ${custCtx}
-
-## YOUR TASK — FOLLOW THESE STEPS IN ORDER
-
-### STEP 1 — Verbatim Row Transcription
-List EVERY visible row in the image exactly as written, left-to-right, top-to-bottom.
-Store in "_step1_rows": ["row0 text", "row1 text", ...]. Do NOT skip any row.
-
-### STEP 2 — Row Classification
-For each row from Step 1 assign ONE type: "header" | "customer" | "col_header" | "item" | "transport" | "total" | "skip"
-Store in "_step2_types": [...] (same length as _step1_rows).
-
-### STEP 3 — Structured Extraction
-Fill the output JSON using ONLY what you confirmed in Steps 1 and 2.
-
-## CRITICAL RULES
-1. ONE physical row = ONE line item. NEVER merge two rows. NEVER split one row.
-2. The RIGHTMOST number on an "item" row is almost always the row total. Second-from-right = unit_price. Leftmost number = quantity.
-3. "wezader", "\u12c8\u12d8\u12f0\u122d", "transport", "delivery" rows → transport.amount ONLY, NOT in line_items.
-4. Top section (before column headers) = customer info: name, plate/targa (4-6 digits), place.
-5. Match description to Known Products (fuzzy/phonetic for handwriting variants). Set matched_product_id if found.
-6. Numbers like "3,500" = 3500 (Ethiopian thousands comma).
-
-## OUTPUT — return ONLY valid JSON, no markdown, no code fences:
-{
-  "_step1_rows": [],
-  "_step2_types": [],
-  "customer_header": { "name": null, "targa": null, "place": null },
-  "line_items": [
-    { "description": "", "quantity": 1, "unit_price": 0, "total": 0, "matched_product_id": null }
-  ],
-  "transport": { "amount": null, "worker_note": "", "detected": false },
-  "payment_bank": null,
-  "date": null,
-  "grand_total": null
-}`
-
-  // 4. Call Gemini — NO responseMimeType so CoT reasoning is fully executed
+  // 3. Call Gemini — NO responseMimeType so CoT reasoning is fully executed
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
     {
@@ -658,24 +672,41 @@ Fill the output JSON using ONLY what you confirmed in Steps 1 and 2.
   if (!jsonMatch) throw new Error(`Gemini returned no JSON. Preview: ${rawText.slice(0, 300)}`)
   const g = JSON.parse(jsonMatch[0])
 
-  // 6. Normalise line items
+  // 6. Normalise line items — preserve matched_product_id / matched_product_name
   const lineItems = (g.line_items || []).map((it: any) => ({
-    description: String(it.description || ''),
-    quantity:    Math.max(Number(it.quantity)   || 1, 0.001),
-    unit_price:  Number(it.unit_price) || 0,
-    total:       Number(it.total)      || 0,
+    description:          String(it.description || ''),
+    matched_product_id:   it.matched_product_id   || null,
+    matched_product_name: it.matched_product_name || null,
+    quantity:             Math.max(Number(it.quantity)  || 1, 0.001),
+    unit_price:           Number(it.unit_price) || 0,
+    total:                Number(it.total)      || 0,
   }))
 
   const itemsTotal      = lineItems.reduce((s: number, i: any) => s + i.total, 0)
-  const transportAmount = Number(g.transport?.amount) || 0
-  const grandTotal      = Number(g.grand_total) || (itemsTotal + transportAmount)
+  const transportAmount = Number(g.transport_fee) || 0
+  const grandTotal      = Number(g.total) || (itemsTotal + transportAmount)
+
+  // Determine targa vs place from the free-form notes field
+  const notesStr       = String(g.notes || '').trim()
+  const looksLikeTarga = notesStr.length > 0 &&
+    (/^\d{4,8}$/.test(notesStr) || /^[A-Z]{1,3}\d{4,6}$/i.test(notesStr))
+  const targa = looksLikeTarga ? notesStr : null
+  const place = looksLikeTarga ? null     : (notesStr || null)
 
   return {
-    raw_text:        (g._step1_rows || []).join('\n'),
+    raw_text:        String(g._step_1_raw_transcription || ''),
     raw_blocks:      [],
-    customer_header: g.customer_header || { name: null, targa: null, place: null },
-    transport:       g.transport       || { amount: null, worker_note: '', detected: false },
-    payment_bank:    g.payment_bank    || null,
+    customer_header: {
+      name:  g.customer_name || null,
+      targa: targa,
+      place: place,
+    },
+    transport: {
+      amount:      transportAmount > 0 ? transportAmount : null,
+      worker_note: '',
+      detected:    transportAmount > 0,
+    },
+    payment_bank:  g.payment_method || null,
     validation: {
       items_total:      itemsTotal,
       transport_amount: transportAmount,
@@ -683,8 +714,8 @@ Fill the output JSON using ONLY what you confirmed in Steps 1 and 2.
       match:            true,
     },
     parsed_data: {
-      vendor:           g._step1_rows?.[0] || '',
-      date:             g.date || '',
+      vendor:           g.vendor || '',
+      date:             g.date   || '',
       total:            grandTotal,
       scan_mode:        'pro',
       line_items:       lineItems,
