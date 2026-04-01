@@ -418,7 +418,7 @@ function extractPaymentBank(rows: Row[]): string | null {
 
 // ── Step 6: Column detection for correction modal ────────────────────────────
 
-function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any[] } {
+function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any[]; needs_review: boolean } {
   // Scan the next 5 data rows and pick the one with the most tokens
   // (avoids picking an anomalous fractured row as the column template)
   const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0
@@ -442,7 +442,7 @@ function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any
     bestRow = candidates.reduce((best, r) => (!best || r.words.length > best.words.length) ? r : best, undefined as Row | undefined)
   }
 
-  if (!bestRow) return { columns: [] }
+  if (!bestRow) return { columns: [], needs_review: false }
 
   const tokens = bestRow.words.map(w => w.text)
   const columns: any[] = []
@@ -462,7 +462,7 @@ function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any
     columns.push({ index: i, type, sample })
   }
 
-  return { columns }
+  return { columns, needs_review: columns.length >= 2 }
 }
 
 // ── Step 7: Grand total detection ────────────────────────────────────────────
@@ -536,6 +536,11 @@ function parseVisionResponse(response: any, manualColumnOrder?: string[]) {
     match:            detectedTotal > 0 ? Math.abs(calcTotal - detectedTotal) <= 2 : true,
   }
 
+  // Flag column review when math validation fails or items have zero prices
+  if (!validation.match || lineItems.some(i => i.unit_price === 0 && i.total === 0)) {
+    columnDetection.needs_review = true
+  }
+
   return {
     raw_text:        fullText,
     raw_blocks:      allAnnotations.slice(0, 50),
@@ -553,6 +558,141 @@ function parseVisionResponse(response: any, manualColumnOrder?: string[]) {
   }
 }
 
+// ── Gemini Pro Scan ────────────────────────────────────────────────────────────
+// Called when mode === 'pro'. Fetches the image bytes, base64-encodes them, and
+// sends them to Gemini 1.5 Flash with a two-step Chain-of-Thought prompt.
+// Deliberately omits responseMimeType so real CoT reasoning is not suppressed.
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
+async function callGeminiProScan(
+  imageUrl: string,
+  userContext: { products: any[]; customers: any[] },
+  apiKey: string
+) {
+  // 1. Fetch image bytes and encode to base64
+  const imgRes = await fetch(imageUrl)
+  if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`)
+  const buf = await imgRes.arrayBuffer()
+  const b64 = uint8ToBase64(new Uint8Array(buf))
+  const mimeType = imageUrl.toLowerCase().includes('.pdf') ? 'application/pdf' : 'image/webp'
+
+  // 2. Build context strings (capped to stay within token budget)
+  const prodCtx = userContext.products.length
+    ? userContext.products.slice(0, 100).map((p: any) => `• ${p.name} (price: ${p.price})`).join('\n')
+    : 'None'
+  const custCtx = userContext.customers.length
+    ? userContext.customers.slice(0, 50).map((c: any) => c.name).join(', ')
+    : 'None'
+
+  // 3. Two-step CoT prompt — plain-text response so CoT is NOT suppressed
+  const prompt = `You are an expert OCR system for Ethiopian handwritten sales receipts.
+
+## STORE CONTEXT
+Known products:
+${prodCtx}
+
+Known customers: ${custCtx}
+
+## YOUR TASK — FOLLOW THESE STEPS IN ORDER
+
+### STEP 1 — Verbatim Row Transcription
+List EVERY visible row in the image exactly as written, left-to-right, top-to-bottom.
+Store in "_step1_rows": ["row0 text", "row1 text", ...]. Do NOT skip any row.
+
+### STEP 2 — Row Classification
+For each row from Step 1 assign ONE type: "header" | "customer" | "col_header" | "item" | "transport" | "total" | "skip"
+Store in "_step2_types": [...] (same length as _step1_rows).
+
+### STEP 3 — Structured Extraction
+Fill the output JSON using ONLY what you confirmed in Steps 1 and 2.
+
+## CRITICAL RULES
+1. ONE physical row = ONE line item. NEVER merge two rows. NEVER split one row.
+2. The RIGHTMOST number on an "item" row is almost always the row total. Second-from-right = unit_price. Leftmost number = quantity.
+3. "wezader", "\u12c8\u12d8\u12f0\u122d", "transport", "delivery" rows → transport.amount ONLY, NOT in line_items.
+4. Top section (before column headers) = customer info: name, plate/targa (4-6 digits), place.
+5. Match description to Known Products (fuzzy/phonetic for handwriting variants). Set matched_product_id if found.
+6. Numbers like "3,500" = 3500 (Ethiopian thousands comma).
+
+## OUTPUT — return ONLY valid JSON, no markdown, no code fences:
+{
+  "_step1_rows": [],
+  "_step2_types": [],
+  "customer_header": { "name": null, "targa": null, "place": null },
+  "line_items": [
+    { "description": "", "quantity": 1, "unit_price": 0, "total": 0, "matched_product_id": null }
+  ],
+  "transport": { "amount": null, "worker_note": "", "detected": false },
+  "payment_bank": null,
+  "date": null,
+  "grand_total": null
+}`
+
+  // 4. Call Gemini — NO responseMimeType so CoT reasoning is fully executed
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: b64 } },
+        ]}],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+      }),
+    }
+  )
+
+  if (!res.ok) throw new Error(`Gemini API error: ${await res.text()}`)
+  const gData = await res.json()
+  const rawText: string = gData.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+
+  // 5. Extract the first JSON object (model may prefix with reasoning text)
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error(`Gemini returned no JSON. Preview: ${rawText.slice(0, 300)}`)
+  const g = JSON.parse(jsonMatch[0])
+
+  // 6. Normalise line items
+  const lineItems = (g.line_items || []).map((it: any) => ({
+    description: String(it.description || ''),
+    quantity:    Math.max(Number(it.quantity)   || 1, 0.001),
+    unit_price:  Number(it.unit_price) || 0,
+    total:       Number(it.total)      || 0,
+  }))
+
+  const itemsTotal      = lineItems.reduce((s: number, i: any) => s + i.total, 0)
+  const transportAmount = Number(g.transport?.amount) || 0
+  const grandTotal      = Number(g.grand_total) || (itemsTotal + transportAmount)
+
+  return {
+    raw_text:        (g._step1_rows || []).join('\n'),
+    raw_blocks:      [],
+    customer_header: g.customer_header || { name: null, targa: null, place: null },
+    transport:       g.transport       || { amount: null, worker_note: '', detected: false },
+    payment_bank:    g.payment_bank    || null,
+    validation: {
+      items_total:      itemsTotal,
+      transport_amount: transportAmount,
+      detected_total:   grandTotal,
+      match:            true,
+    },
+    parsed_data: {
+      vendor:           g._step1_rows?.[0] || '',
+      date:             g.date || '',
+      total:            grandTotal,
+      scan_mode:        'pro',
+      line_items:       lineItems,
+      column_detection: { columns: [], needs_review: false },
+    },
+  }
+}
+
 // ── Edge Function handler ─────────────────────────────────────────────────────
 
 serve(async (req: Request) => {
@@ -562,36 +702,48 @@ serve(async (req: Request) => {
 
   try {
     const body = await req.json()
-    const { imageUrl, manual_column_order } = body
+    const { imageUrl, manual_column_order, mode, userContext } = body
     if (!imageUrl) throw new Error("imageUrl is required")
 
-    const serviceAccount = JSON.parse(Deno.env.get("GOOGLE_SERVICE_ACCOUNT") || "")
-    const accessToken    = await getGoogleAccessToken(serviceAccount)
+    let parsed
 
-    const visionRes = await fetch(
-      "https://vision.googleapis.com/v1/images:annotate",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type":  "application/json",
-        },
-        body: JSON.stringify({
-          requests: [{
-            image:    { source: { imageUri: imageUrl } },
-            features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
-          }],
-        }),
+    if (mode === 'pro') {
+      const geminiKey = Deno.env.get("GEMINI_API_KEY") || ""
+      if (!geminiKey) throw new Error("GEMINI_API_KEY is not configured for Pro Scan")
+      parsed = await callGeminiProScan(
+        imageUrl,
+        userContext || { products: [], customers: [] },
+        geminiKey
+      )
+    } else {
+      const serviceAccount = JSON.parse(Deno.env.get("GOOGLE_SERVICE_ACCOUNT") || "")
+      const accessToken    = await getGoogleAccessToken(serviceAccount)
+
+      const visionRes = await fetch(
+        "https://vision.googleapis.com/v1/images:annotate",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type":  "application/json",
+          },
+          body: JSON.stringify({
+            requests: [{
+              image:    { source: { imageUri: imageUrl } },
+              features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+            }],
+          }),
+        }
+      )
+
+      if (!visionRes.ok) {
+        const err = await visionRes.text()
+        throw new Error(`Vision API error: ${err}`)
       }
-    )
 
-    if (!visionRes.ok) {
-      const err = await visionRes.text()
-      throw new Error(`Vision API error: ${err}`)
+      const visionData = await visionRes.json()
+      parsed = parseVisionResponse(visionData, manual_column_order)
     }
-
-    const visionData = await visionRes.json()
-    const parsed     = parseVisionResponse(visionData, manual_column_order)
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

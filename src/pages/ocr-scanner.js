@@ -345,6 +345,19 @@ export async function render(container) {
     }
   }
 
+  // ── Merge top-level OCR response fields into parsed_data before saving ──────
+  // processFinalFlow only stores parsed_data; customer_header/transport/payment_bank
+  // live at the top level of the OCR response and must be merged in here.
+  function enrichOcrResult(parsedData, fullResult) {
+    return {
+      ...parsedData,
+      customer_header: fullResult.customer_header || parsedData.customer_header || null,
+      transport:       fullResult.transport       || parsedData.transport       || null,
+      payment_bank:    fullResult.payment_bank    || parsedData.payment_bank    || null,
+      validation:      fullResult.validation      || parsedData.validation      || null,
+    }
+  }
+
   // ── Main scan flow ────────────────────────────────────
   async function doScan() {
     const isPro = scanMode === 'pro'
@@ -395,7 +408,7 @@ export async function render(container) {
       // 5. Route based on mode and result flags
       if (isPro) {
         // Pro Mode: skip column correction, go straight to smart modal
-        await processFinalFlow(ocrResult.parsed_data, ocrResult.id, publicUrl)
+        await processFinalFlow(enrichOcrResult(ocrResult.parsed_data, ocrResult), ocrResult.id, publicUrl)
       } else {
         // Standard Mode: check if column correction is needed
         const parsedData = ocrResult?.parsed_data || { line_items: [] }
@@ -405,10 +418,12 @@ export async function render(container) {
           hideProgress()
           const { openColumnCorrectionModal } = await import('../components/column-correction-modal.js')
           openColumnCorrectionModal({
-            imageUrl: publicUrl,
-            columns:  parsedData.column_detection.columns,
-            rawText:  ocrResult.raw_text,
-            onSave: async (orderedTypes) => {
+            imageUrl:       publicUrl,
+            columns:        parsedData.column_detection.columns,
+            rawText:        ocrResult.raw_text,
+            customerHeader: ocrResult.customer_header || {},
+            transport:      ocrResult.transport       || null,
+            onSave: async (orderedTypes, confirmedHeader, manualTransportFee) => {
               showProgress('Re-processing with corrected columns...')
               try {
                 const { data: finalResult, error: finalError } = await supabase.functions.invoke('ocr-proxy', {
@@ -421,7 +436,10 @@ export async function render(container) {
                 })
                 if (finalError) throw new Error(finalError.message)
                 if (finalResult?.error) throw new Error(finalResult.error)
-                await processFinalFlow(finalResult.parsed_data, finalResult?.id || logId, publicUrl)
+                const retryData = enrichOcrResult(finalResult.parsed_data, finalResult)
+                if (confirmedHeader) retryData.customer_header = confirmedHeader
+                if (manualTransportFee > 0) retryData.transport = { ...(finalResult.transport || {}), amount: manualTransportFee, detected: true }
+                await processFinalFlow(retryData, finalResult?.id || logId, publicUrl)
               } catch (err) {
                 console.error(err)
                 showToast('Correction failed: ' + err.message, 'error')
@@ -436,7 +454,7 @@ export async function render(container) {
             }
           })
         } else {
-          await processFinalFlow(parsedData, logId, publicUrl)
+          await processFinalFlow(enrichOcrResult(parsedData, ocrResult), logId, publicUrl)
         }
       }
 
