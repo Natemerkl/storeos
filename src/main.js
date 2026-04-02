@@ -8,6 +8,7 @@ window.addEventListener('unhandledrejection', (e) => {
 
 import './styles/main.css'
 import './styles/mobile.css'
+import './styles/components.css'
 import { initRouter, navigate } from './router.js'
 import { supabase } from './supabase.js'
 import { appStore } from './store.js'

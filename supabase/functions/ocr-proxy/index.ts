@@ -656,7 +656,7 @@ async function callGeminiProScan(
 
   // 3. Call Gemini — NO responseMimeType so CoT reasoning is fully executed
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -746,16 +746,35 @@ serve(async (req: Request) => {
     let parsed
 
     if (mode === 'pro') {
-      const geminiKey = Deno.env.get("GEMINI_API_KEY") || ""
-      if (!geminiKey) throw new Error("GEMINI_API_KEY is not configured for Pro Scan")
+      const geminiKey = Deno.env.get("GEMINI_API_KEY")
+      if (!geminiKey) {
+        throw new Error("GEMINI_API_KEY is not configured for Pro Scan")
+      }
+      if (geminiKey.trim() === "") {
+        throw new Error("GEMINI_API_KEY is empty for Pro Scan")
+      }
       parsed = await callGeminiProScan(
         imageUrl,
         userContext || { products: [], customers: [] },
         geminiKey
       )
     } else {
-      const serviceAccount = JSON.parse(Deno.env.get("GOOGLE_SERVICE_ACCOUNT") || "")
-      const accessToken    = await getGoogleAccessToken(serviceAccount)
+      const serviceAccountEnv = Deno.env.get("GOOGLE_SERVICE_ACCOUNT")
+      if (!serviceAccountEnv) {
+        throw new Error("GOOGLE_SERVICE_ACCOUNT is not configured for Standard Scan")
+      }
+      if (serviceAccountEnv.trim() === "") {
+        throw new Error("GOOGLE_SERVICE_ACCOUNT is empty for Standard Scan")
+      }
+      
+      let serviceAccount
+      try {
+        serviceAccount = JSON.parse(serviceAccountEnv)
+      } catch (parseErr) {
+        throw new Error("GOOGLE_SERVICE_ACCOUNT is not valid JSON")
+      }
+      
+      const accessToken = await getGoogleAccessToken(serviceAccount)
 
       const visionRes = await fetch(
         "https://vision.googleapis.com/v1/images:annotate",
@@ -789,8 +808,30 @@ serve(async (req: Request) => {
 
   } catch (err: any) {
     console.error("OCR proxy error:", err)
+    console.error("Error stack:", err.stack)
+    
+    // Try to log request body if available, but don't crash if it fails
+    try {
+      const body = await req.clone().json()
+      console.error("Request body received:", JSON.stringify(body, null, 2))
+    } catch (bodyErr) {
+      console.error("Could not log request body:", bodyErr.message)
+    }
+    
+    // Add more specific error context
+    let errorMessage = err.message
+    if (err.message.includes("GOOGLE_SERVICE_ACCOUNT")) {
+      errorMessage = "Google Vision API not configured: GOOGLE_SERVICE_ACCOUNT environment variable is missing or invalid"
+    } else if (err.message.includes("GEMINI_API_KEY")) {
+      errorMessage = "Gemini API not configured: GEMINI_API_KEY environment variable is missing"
+    } else if (err.message.includes("Vision API error")) {
+      errorMessage = `Google Vision API error: ${err.message}`
+    } else if (err.message.includes("Gemini API error")) {
+      errorMessage = `Gemini API error: ${err.message}`
+    }
+    
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({ error: errorMessage, details: err.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     )
   }
