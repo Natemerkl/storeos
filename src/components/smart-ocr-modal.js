@@ -54,6 +54,12 @@ export function openSmartOcrModal({ rawText, parsedData, sourceImage, inventory 
   // ============================================================
   recalculateTotals(modal, data)
 
+  // Lock body scroll to prevent background scrolling on mobile
+  document.body.style.overflow = 'hidden'
+  document.body.style.position = 'fixed'
+  document.body.style.width = '100%'
+  document.body.style.top = `-${window.scrollY}px`
+
   // Animate in
   requestAnimationFrame(() => modal.classList.add('active'))
 }
@@ -69,7 +75,8 @@ function buildModalHTML(data, inventory, customers, accounts = []) {
   const customerName = data.customer_name || data.customer_header?.name || ''
   const vendor = data.vendor || ''
   const date = data.date || new Date().toISOString().split('T')[0]
-  const notes = data.notes || data.customer_header?.targa || ''
+  const plateNumber = data.plate_number || data.customer_header?.targa || ''
+  const notes = data.notes || ''
   const detectedBank = data.payment_bank || data.payment_method || null
   const needsReview = data.column_detection?.needs_review || false
 
@@ -133,15 +140,21 @@ function buildModalHTML(data, inventory, customers, accounts = []) {
               <input type="hidden" id="ocr-matched-customer-id" value="${data.matched_customer_id || ''}">
             </div>
             <div class="smart-ocr-field">
-              <label>Vendor / Supplier</label>
-              <input type="text" id="ocr-vendor" value="${escapeHTML(vendor)}" placeholder="Vendor">
+              <label>Plate Number</label>
+              <input type="text" id="ocr-plate-number" value="${escapeHTML(plateNumber)}" placeholder="Vehicle plate">
             </div>
           </div>
           <div class="smart-ocr-meta-row">
             <div class="smart-ocr-field">
+              <label>Vendor / Supplier</label>
+              <input type="text" id="ocr-vendor" value="${escapeHTML(vendor)}" placeholder="Vendor">
+            </div>
+            <div class="smart-ocr-field">
               <label>Date</label>
               <input type="date" id="ocr-date" value="${date}">
             </div>
+          </div>
+          <div class="smart-ocr-meta-row">
             <div class="smart-ocr-field">
               <label>Payment Account</label>
               <select id="ocr-payment-method">
@@ -492,6 +505,7 @@ function collectFinalData(modal, originalData) {
   return {
     customer_name: modal.querySelector('#ocr-customer-name')?.value?.trim() || '',
     matched_customer_id: modal.querySelector('#ocr-matched-customer-id')?.value || null,
+    plate_number: modal.querySelector('#ocr-plate-number')?.value?.trim() || '',
     vendor: modal.querySelector('#ocr-vendor')?.value?.trim() || '',
     date: modal.querySelector('#ocr-date')?.value || '',
     payment_method: isCredit ? 'credit' : accountType === 'bank' ? 'bank_transfer' : 'cash',
@@ -512,6 +526,17 @@ function collectFinalData(modal, originalData) {
 
 function closeModal(modal) {
   modal.classList.remove('active')
+  
+  // Restore body scroll and position
+  const scrollY = document.body.style.top
+  document.body.style.overflow = ''
+  document.body.style.position = ''
+  document.body.style.width = ''
+  document.body.style.top = ''
+  if (scrollY) {
+    window.scrollTo(0, parseInt(scrollY || '0') * -1)
+  }
+  
   setTimeout(() => modal.remove(), 300)
 }
 
@@ -548,6 +573,7 @@ async function doSale(d, items, storeId, logId) {
     ocr_log_id:      logId || null,
     transport_fee:   d.transport_fee > 0 ? d.transport_fee : null,
     notes:           d.notes || null,
+    plate_number:    d.plate_number || null,
   }).select('id').single()
   if (saleErr) throw saleErr
 
@@ -569,7 +595,11 @@ async function doSale(d, items, storeId, logId) {
       custId = existing?.id
       if (!custId) {
         const { data: nc } = await supabase.from('customers')
-          .insert({ store_id: storeId, name: d.customer_name }).select('id').single()
+          .insert({ 
+            store_id: storeId, 
+            name: d.customer_name,
+            plate_number: d.plate_number || null 
+          }).select('id').single()
         custId = nc?.id
       }
     }
