@@ -133,21 +133,24 @@ function buildModalHTML(data, inventory, customers, accounts = []) {
         <!-- Meta Section -->
         <div class="smart-ocr-meta-section">
           <div class="smart-ocr-meta-row">
-            <div class="smart-ocr-field">
+            <div class="smart-ocr-field" style="position: relative;">
               <label>Customer Name</label>
-              <input type="text" id="ocr-customer-name" value="${escapeHTML(customerName)}" placeholder="Customer name">
+              <input type="text" id="ocr-customer-name" value="${escapeHTML(customerName)}" placeholder="Customer name" autocomplete="off">
+              <div id="ocr-customer-autocomplete" class="smart-ocr-autocomplete"></div>
               ${data.matched_customer_id ? `<span class="smart-ocr-match-badge">&#10003; Matched</span>` : `<span class="smart-ocr-no-match">No customer match</span>`}
               <input type="hidden" id="ocr-matched-customer-id" value="${data.matched_customer_id || ''}">
             </div>
-            <div class="smart-ocr-field">
+            <div class="smart-ocr-field" style="position: relative;">
               <label>Plate Number</label>
-              <input type="text" id="ocr-plate-number" value="${escapeHTML(plateNumber)}" placeholder="Vehicle plate">
+              <input type="text" id="ocr-plate-number" value="${escapeHTML(plateNumber)}" placeholder="Vehicle plate" autocomplete="off">
+              <div id="ocr-plate-autocomplete" class="smart-ocr-autocomplete"></div>
             </div>
           </div>
           <div class="smart-ocr-meta-row">
-            <div class="smart-ocr-field">
+            <div class="smart-ocr-field" style="position: relative;">
               <label>Vendor / Supplier</label>
-              <input type="text" id="ocr-vendor" value="${escapeHTML(vendor)}" placeholder="Vendor">
+              <input type="text" id="ocr-vendor" value="${escapeHTML(vendor)}" placeholder="Vendor" autocomplete="off">
+              <div id="ocr-vendor-autocomplete" class="smart-ocr-autocomplete"></div>
             </div>
             <div class="smart-ocr-field">
               <label>Date</label>
@@ -378,6 +381,78 @@ function attachEventListeners(modal, data, inventory, customers, accounts = [], 
     recalculateTotals(modal, data)
   })
 
+  // Autocomplete for Customer Name
+  setupAutocomplete(
+    modal.querySelector('#ocr-customer-name'),
+    modal.querySelector('#ocr-customer-autocomplete'),
+    async (query) => {
+      const { currentStore } = appStore.getState()
+      if (!currentStore?.id || !query) return []
+      const { data } = await supabase
+        .from('customers')
+        .select('id, name, plate_number')
+        .eq('store_id', currentStore.id)
+        .ilike('name', `%${query}%`)
+        .limit(10)
+      return data || []
+    },
+    (item) => item.name,
+    (item) => {
+      modal.querySelector('#ocr-customer-name').value = item.name
+      modal.querySelector('#ocr-matched-customer-id').value = item.id
+      if (item.plate_number) {
+        modal.querySelector('#ocr-plate-number').value = item.plate_number
+      }
+    }
+  )
+
+  // Autocomplete for Plate Number
+  setupAutocomplete(
+    modal.querySelector('#ocr-plate-number'),
+    modal.querySelector('#ocr-plate-autocomplete'),
+    async (query) => {
+      const { currentStore } = appStore.getState()
+      if (!currentStore?.id || !query) return []
+      const { data } = await supabase
+        .from('customers')
+        .select('id, name, plate_number')
+        .eq('store_id', currentStore.id)
+        .not('plate_number', 'is', null)
+        .ilike('plate_number', `%${query}%`)
+        .limit(10)
+      return data || []
+    },
+    (item) => `${item.plate_number} - ${item.name}`,
+    (item) => {
+      modal.querySelector('#ocr-plate-number').value = item.plate_number
+      modal.querySelector('#ocr-customer-name').value = item.name
+      modal.querySelector('#ocr-matched-customer-id').value = item.id
+    }
+  )
+
+  // Autocomplete for Vendor
+  setupAutocomplete(
+    modal.querySelector('#ocr-vendor'),
+    modal.querySelector('#ocr-vendor-autocomplete'),
+    async (query) => {
+      const { currentStore } = appStore.getState()
+      if (!currentStore?.id || !query) return []
+      const { data } = await supabase
+        .from('expenses')
+        .select('vendor')
+        .eq('store_id', currentStore.id)
+        .not('vendor', 'is', null)
+        .ilike('vendor', `%${query}%`)
+        .limit(10)
+      const uniqueVendors = [...new Set(data?.map(e => e.vendor).filter(Boolean))]
+      return uniqueVendors.map(v => ({ vendor: v }))
+    },
+    (item) => item.vendor,
+    (item) => {
+      modal.querySelector('#ocr-vendor').value = item.vendor
+    }
+  )
+
   // Confirm / Register Sale
   modal.querySelector('#ocr-modal-confirm')?.addEventListener('click', async () => {
     const finalData = collectFinalData(modal, data)
@@ -517,6 +592,83 @@ function collectFinalData(modal, originalData) {
     scan_mode: originalData.scan_mode || 'pro',
     raw_text: originalData.raw_text || ''
   }
+}
+
+
+// ================================================================
+//  AUTOCOMPLETE HELPER
+// ================================================================
+
+function setupAutocomplete(inputEl, dropdownEl, fetchFn, displayFn, selectFn) {
+  if (!inputEl || !dropdownEl) return
+
+  let debounceTimer = null
+  let currentItems = []
+
+  inputEl.addEventListener('input', async (e) => {
+    const query = e.target.value.trim()
+    
+    clearTimeout(debounceTimer)
+    
+    if (query.length < 2) {
+      dropdownEl.innerHTML = ''
+      dropdownEl.style.display = 'none'
+      return
+    }
+
+    debounceTimer = setTimeout(async () => {
+      try {
+        currentItems = await fetchFn(query)
+        
+        if (currentItems.length === 0) {
+          dropdownEl.innerHTML = '<div class="smart-ocr-autocomplete-item smart-ocr-autocomplete-empty">No matches found</div>'
+          dropdownEl.style.display = 'block'
+          return
+        }
+
+        dropdownEl.innerHTML = currentItems
+          .map((item, idx) => `
+            <div class="smart-ocr-autocomplete-item" data-index="${idx}">
+              ${escapeHTML(displayFn(item))}
+            </div>
+          `).join('')
+        
+        dropdownEl.style.display = 'block'
+
+        // Add click handlers
+        dropdownEl.querySelectorAll('.smart-ocr-autocomplete-item').forEach(itemEl => {
+          itemEl.addEventListener('click', () => {
+            const idx = parseInt(itemEl.dataset.index)
+            if (idx >= 0 && currentItems[idx]) {
+              selectFn(currentItems[idx])
+              dropdownEl.innerHTML = ''
+              dropdownEl.style.display = 'none'
+            }
+          })
+        })
+      } catch (err) {
+        console.error('Autocomplete error:', err)
+        dropdownEl.innerHTML = ''
+        dropdownEl.style.display = 'none'
+      }
+    }, 300)
+  })
+
+  // Close dropdown on outside click
+  document.addEventListener('click', (e) => {
+    if (!inputEl.contains(e.target) && !dropdownEl.contains(e.target)) {
+      dropdownEl.innerHTML = ''
+      dropdownEl.style.display = 'none'
+    }
+  })
+
+  // Close dropdown on blur
+  inputEl.addEventListener('blur', () => {
+    setTimeout(() => {
+      dropdownEl.innerHTML = ''
+      dropdownEl.style.display = 'none'
+    }, 200)
+  })
 }
 
 

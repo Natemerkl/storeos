@@ -311,6 +311,49 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Autocomplete dropdown */
+.smart-ocr-autocomplete {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000;
+  display: none;
+  margin-top: 4px;
+}
+
+.smart-ocr-autocomplete-item {
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.15s;
+}
+
+.smart-ocr-autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.smart-ocr-autocomplete-item:hover {
+  background-color: #f5f5f5;
+}
+
+.smart-ocr-autocomplete-item.smart-ocr-autocomplete-empty {
+  color: #999;
+  cursor: default;
+  font-style: italic;
+}
+
+.smart-ocr-autocomplete-item.smart-ocr-autocomplete-empty:hover {
+  background-color: transparent;
+}
+
 /* Desktop/Tablet adjustments */
 @media (min-width: 768px) {
   .smart-ocr-modal-overlay {
