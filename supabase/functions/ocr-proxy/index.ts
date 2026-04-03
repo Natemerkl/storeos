@@ -665,7 +665,7 @@ async function callGeminiProScan(
           { text: prompt },
           { inline_data: { mime_type: mimeType, data: b64 } },
         ]}],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
       }),
     }
   )
@@ -675,9 +675,24 @@ async function callGeminiProScan(
   const rawText: string = gData.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
 
   // 5. Extract the first JSON object (model may prefix with reasoning text)
-  const jsonMatch = rawText.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error(`Gemini returned no JSON. Preview: ${rawText.slice(0, 300)}`)
-  const g = JSON.parse(jsonMatch[0])
+  let g: any
+  try {
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      return new Response(JSON.stringify({
+        success: false,
+        error_code: 'AI_PARSE_ERROR',
+        message: "The AI couldn't format the receipt properly."
+      }), { status: 422, headers: { 'Content-Type': 'application/json' } })
+    }
+    g = JSON.parse(jsonMatch[0])
+  } catch (parseError) {
+    return new Response(JSON.stringify({
+      success: false,
+      error_code: 'AI_PARSE_ERROR',
+      message: "The AI couldn't format the receipt properly."
+    }), { status: 422, headers: { 'Content-Type': 'application/json' } })
+  }
 
   // 6. Normalise line items — preserve matched_product_id / matched_product_name
   const lineItems = (g.line_items || []).map((it: any) => ({

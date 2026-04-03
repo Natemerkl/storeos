@@ -5,6 +5,7 @@ import { renderIcon } from '../components/icons.js'
 import { openSmartOCRModal } from '../components/smart-ocr-modal.js'
 import { consumePendingScan } from '../components/mobile-nav.js'
 import { getInventory, getCustomers } from '../utils/db.js'
+import { OCRNotifications } from '../components/notification-manager.js'
 
 export async function render(container) {
   const { currentStore } = appStore.getState()
@@ -358,18 +359,33 @@ export async function render(container) {
     }
   }
 
-  // ── Main scan flow ────────────────────────────────────
+  // ── Main scan flow (NON-BLOCKING) ────────────────────────────────────
   async function doScan() {
     const isPro = scanMode === 'pro'
-    showProgress(isPro ? 'Preparing AI scan...' : 'Uploading receipt...')
+    const fileToScan = selectedFile
 
+    // IMMEDIATELY clear UI and show background notification
+    selectedFile = null
+    container.querySelector('#preview-section').style.display = 'none'
+    dropZone.style.display = 'block'
+    fileInput.value = ''
+
+    // Show professional loading notification
+    OCRNotifications.showAnalyzing()
+
+    // Run OCR in background - user can navigate away
+    processOCRInBackground(fileToScan, isPro)
+  }
+
+  // ── Background OCR Processing ────────────────────────────────────
+  async function processOCRInBackground(file, isPro) {
     try {
-      // 1. Compress image (Phase 1: aggressive client-side compression)
-      const compressed = await compressImage(selectedFile)
+      // 1. Compress image
+      const compressed = await compressImage(file)
 
       // 2. Upload to Supabase Storage
-      const ext      = (selectedFile.name.split('.').pop() || 'jpg').toLowerCase()
-      const fileName = `${currentStore?.id || 'scan'}/${Date.now()}.${ext === 'pdf' ? 'pdf' : 'webp'}` 
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      const fileName = `${currentStore?.id || 'scan'}/${Date.now()}.${ext === 'pdf' ? 'pdf' : 'webp'}`
 
       const { error: uploadError } = await supabase.storage
         .from('receipts')
@@ -383,63 +399,70 @@ export async function render(container) {
       const { data: { publicUrl } } = supabase.storage
         .from('receipts').getPublicUrl(fileName)
 
-      // 3. Fetch user context for Pro Mode (parallel with upload would be ideal but upload must be first)
+      // 3. Fetch user context for Pro Mode
       let userContext = { products: [], customers: [] }
       if (isPro) {
-        showProgress('Fetching store context...')
         userContext = await fetchUserContext()
       }
-
-      showProgress(isPro ? 'Gemini AI is reading your document...' : 'AI is reading your document...')
 
       // 4. Call OCR Edge Function with mode + context
       const { data: ocrResult, error: ocrError } = await supabase.functions.invoke('ocr-proxy', {
         body: {
-          imageUrl:    publicUrl,
-          storeId:     currentStore?.id || 'onboarding',
-          mode:        scanMode,                 // 'standard' | 'pro'
+          imageUrl: publicUrl,
+          storeId: currentStore?.id || 'onboarding',
+          mode: scanMode,
           userContext: isPro ? userContext : undefined,
         }
       })
 
+      // Handle Edge Function errors
       if (ocrError) throw new Error(ocrError.message || 'OCR failed')
+
+      // Handle AI_PARSE_ERROR (422 response)
+      if (ocrResult?.error_code === 'AI_PARSE_ERROR') {
+        OCRNotifications.showError(
+          'The handwriting was too difficult for the AI to format. Please retake a clearer photo.',
+          () => {
+            navigate('/ocr-scanner')
+          }
+        )
+        return
+      }
+
+      // Handle other errors
       if (ocrResult?.error) throw new Error(ocrResult.error)
 
       console.log('[DEBUG] Raw Edge Function Response:', ocrResult)
 
-      // Warn if Pro scan fell back to Vision (GEMINI_API_KEY missing or Gemini error)
-      if (ocrResult?.parsed_data?.fallback_from_pro) {
-        showToast('⚠️ Pro scan fell back to Standard mode — check that GEMINI_API_KEY is set in Supabase secrets.', 'warning')
-      }
-
       // 5. Route based on mode and result flags
       if (isPro) {
-        // Pro Mode: skip column correction, go straight to smart modal
+        // Pro Mode: skip column correction, go straight to success notification
         const enrichedPro = enrichOcrResult(ocrResult.parsed_data, ocrResult)
         console.log('[DEBUG] Enriched parsed_data going to DB:', enrichedPro)
-        await processFinalFlow(enrichedPro, ocrResult.id, publicUrl)
+        await handleScanSuccess(enrichedPro, ocrResult.id, publicUrl)
       } else {
         // Standard Mode: check if column correction is needed
         const parsedData = ocrResult?.parsed_data || { line_items: [] }
-        const logId      = ocrResult?.id
+        const logId = ocrResult?.id
 
         if (parsedData.column_detection?.needs_review) {
-          hideProgress()
+          // For column correction, show notification and open modal
+          OCRNotifications.dismiss()
           const { openColumnCorrectionModal } = await import('../components/column-correction-modal.js')
           openColumnCorrectionModal({
-            imageUrl:       publicUrl,
-            columns:        parsedData.column_detection.columns,
-            rawText:        ocrResult.raw_text,
+            imageUrl: publicUrl,
+            columns: parsedData.column_detection.columns,
+            rawText: ocrResult.raw_text,
             customerHeader: ocrResult.customer_header || {},
-            transport:      ocrResult.transport       || null,
+            transport: ocrResult.transport || null,
             onSave: async (orderedTypes, confirmedHeader, manualTransportFee) => {
-              showProgress('Re-processing with corrected columns...')
+              OCRNotifications.showAnalyzing()
               try {
                 const { data: finalResult, error: finalError } = await supabase.functions.invoke('ocr-proxy', {
                   body: {
-                    imageUrl:            publicUrl,
-                    storeId:             currentStore?.id || 'onboarding',
-                    mode:                'standard',
+                    imageUrl: publicUrl,
+                    storeId: currentStore?.id || 'onboarding',
+                    mode: 'standard',
                     manual_column_order: orderedTypes,
                   }
                 })
@@ -448,101 +471,65 @@ export async function render(container) {
                 const retryData = enrichOcrResult(finalResult.parsed_data, finalResult)
                 if (confirmedHeader) retryData.customer_header = confirmedHeader
                 if (manualTransportFee > 0) retryData.transport = { ...(finalResult.transport || {}), amount: manualTransportFee, detected: true }
-                await processFinalFlow(retryData, finalResult?.id || logId, publicUrl)
+                await handleScanSuccess(retryData, finalResult?.id || logId, publicUrl)
               } catch (err) {
                 console.error(err)
-                showToast('Correction failed: ' + err.message, 'error')
+                OCRNotifications.showError('Correction failed: ' + err.message)
               }
             },
             onRescan: () => {
-              selectedFile = null
-              isScanning   = false
-              container.querySelector('#preview-section').style.display = 'none'
-              dropZone.style.display = 'block'
-              fileInput.value = ''
+              navigate('/ocr-scanner')
             }
           })
         } else {
-          await processFinalFlow(enrichOcrResult(parsedData, ocrResult), logId, publicUrl)
+          await handleScanSuccess(enrichOcrResult(parsedData, ocrResult), logId, publicUrl)
         }
       }
 
-    } catch(err) {
-      console.error('Scan error:', err)
-      hideProgress()
+    } catch (err) {
+      console.error('Background OCR error:', err)
 
-      showToast(`Scan failed: ${err.message}`, 'error')
-
-      // Offer manual entry fallback
-      if (currentStore?.id) {
-        const useManual = confirm('AI scan failed. Would you like to open manual entry mode instead?')
-        if (useManual) {
-          const { data: logData } = await supabase
-            .from('ocr_logs')
-            .insert({
-              store_id:    currentStore?.id,
-              image_url:   '',
-              raw_text:    '',
-              parsed_data: { line_items: [] },
-              status:      'pending',
-            })
-            .select('id').single()
-
-          if (logData?.id) {
-            selectedFile = null
-            container.querySelector('#preview-section').style.display = 'none'
-            dropZone.style.display = 'block'
-            fileInput.value = ''
-            await openSmartOCRModal(logData.id)
-            loadRecentScans()
-          }
-        }
+      // Determine error type and show appropriate message
+      let errorMessage = 'Server timeout. Please try again.'
+      if (err.message?.includes('format') || err.message?.includes('parse')) {
+        errorMessage = 'The handwriting was too difficult for the AI to format. Please retake a clearer photo.'
+      } else if (err.message) {
+        errorMessage = err.message
       }
+
+      OCRNotifications.showError(errorMessage, () => {
+        navigate('/ocr-scanner')
+      })
     }
   }
 
-  // ── Final flow: persist log & open modal ──────────────
-  async function processFinalFlow(parsedData, existingLogId, publicUrl) {
-    showProgress('Preparing review...')
-
-    let logId = existingLogId
-
-    // Create an ocr_log if the edge function didn't create one
-    if (!logId && currentStore?.id) {
+  // ── Handle successful scan ────────────────────────────────────
+  async function handleScanSuccess(parsedData, logId, publicUrl) {
+    // Create or update OCR log
+    let finalLogId = logId
+    if (!finalLogId && currentStore?.id) {
       const { data: logData, error: logError } = await supabase
         .from('ocr_logs')
         .insert({
-          store_id:    currentStore?.id,
-          image_url:   publicUrl,
-          raw_text:    '',
+          store_id: currentStore?.id,
+          image_url: publicUrl,
+          raw_text: '',
           parsed_data: parsedData,
-          status:      'pending',
+          status: 'pending',
         }).select('id').single()
-      if (logError) throw logError
-      logId = logData?.id
+      if (!logError) finalLogId = logData?.id
     }
 
-    if (!logId) throw new Error('Could not create scan record')
+    // Show success notification with click handler to open modal
+    OCRNotifications.showSuccess(async () => {
+      await openSmartOCRModal(finalLogId)
+      loadRecentScans()
+    })
 
-    hideProgress()
-    selectedFile = null
-    container.querySelector('#preview-section').style.display = 'none'
-    dropZone.style.display = 'block'
-    fileInput.value = ''
-
-    await openSmartOCRModal(logId)
+    // Refresh recent scans list
     loadRecentScans()
   }
 
-  function showProgress(text) {
-    container.querySelector('#preview-section').style.display  = 'none'
-    container.querySelector('#progress-section').style.display = 'block'
-    container.querySelector('#progress-text').textContent      = text
-  }
-
-  function hideProgress() {
-    container.querySelector('#progress-section').style.display = 'none'
-  }
 
   // ── Phase 1: Aggressive client-side image compression ─
   // Target: ≤500KB, max 1600px, WebP preferred with JPEG fallback
