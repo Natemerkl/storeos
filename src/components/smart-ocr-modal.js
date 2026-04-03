@@ -563,8 +563,30 @@ async function doSale(d, items, storeId, logId) {
   const goodsTotal = items.reduce((s, i) => s + (Number(i.total) || 0), 0)
   const grandTotal = goodsTotal + (d.transport_fee || 0)
 
+  // Find or create customer FIRST (required for credit sales)
+  let custId = null
+  if (d.customer_name) {
+    custId = d.matched_customer_id || null
+    if (!custId) {
+      const { data: existing } = await supabase.from('customers')
+        .select('id').eq('store_id', storeId).ilike('name', d.customer_name).maybeSingle()
+      custId = existing?.id
+      if (!custId) {
+        const { data: nc } = await supabase.from('customers')
+          .insert({ 
+            store_id: storeId, 
+            name: d.customer_name,
+            plate_number: d.plate_number || null 
+          }).select('id').single()
+        custId = nc?.id
+      }
+    }
+  }
+
+  // Insert sale with customer_id included from the start
   const { data: sale, error: saleErr } = await supabase.from('sales').insert({
     store_id:        storeId,
+    customer_id:     custId || null,
     cash_account_id: isCredit ? null : (d.cash_account_id || null),
     sale_date:       d.date,
     total_amount:    grandTotal,
@@ -586,35 +608,15 @@ async function doSale(d, items, storeId, logId) {
     })
   }
 
-  // Find or create customer and link
-  if (d.customer_name) {
-    let custId = d.matched_customer_id || null
-    if (!custId) {
-      const { data: existing } = await supabase.from('customers')
-        .select('id').eq('store_id', storeId).ilike('name', d.customer_name).maybeSingle()
-      custId = existing?.id
-      if (!custId) {
-        const { data: nc } = await supabase.from('customers')
-          .insert({ 
-            store_id: storeId, 
-            name: d.customer_name,
-            plate_number: d.plate_number || null 
-          }).select('id').single()
-        custId = nc?.id
-      }
-    }
-    if (custId) {
-      await supabase.from('sales').update({ customer_id: custId }).eq('id', sale.id)
-      if (isCredit) {
-        await supabase.from('credit_sales').insert({
-          store_id:    storeId,
-          sale_id:     sale.id,
-          customer_id: custId,
-          amount_owed: grandTotal,
-          status:      'unpaid',
-        })
-      }
-    }
+  // Create credit_sales record if needed
+  if (isCredit && custId) {
+    await supabase.from('credit_sales').insert({
+      store_id:    storeId,
+      sale_id:     sale.id,
+      customer_id: custId,
+      amount_owed: grandTotal,
+      status:      'unpaid',
+    })
   }
 
   // Transport fee expense
