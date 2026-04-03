@@ -430,20 +430,45 @@ function attachEventListeners(modal, data, inventory, customers, accounts = [], 
     }
   )
 
-  // Autocomplete for Vendor
+  // Autocomplete for Vendor — pulls from vendors table + inventory_items.supplier history
   setupAutocomplete(
     modal.querySelector('#ocr-vendor'),
     modal.querySelector('#ocr-vendor-autocomplete'),
     async (query) => {
       const { currentStore } = appStore.getState()
       if (!currentStore?.id || !query) return []
-      const { data } = await supabase
-        .from('vendors')
-        .select('id, name')
-        .eq('store_id', currentStore.id)
-        .ilike('name', `%${query}%`)
-        .limit(10)
-      return data || []
+
+      const [vendorsRes, inventoryRes] = await Promise.all([
+        supabase
+          .from('vendors')
+          .select('id, vendor_name')
+          .eq('store_id', currentStore.id)
+          .ilike('vendor_name', `%${query}%`)
+          .limit(10),
+        supabase
+          .from('inventory_items')
+          .select('supplier')
+          .eq('store_id', currentStore.id)
+          .ilike('supplier', `%${query}%`)
+          .limit(20),
+      ])
+
+      const fromVendors = (vendorsRes.data || []).map(v => ({ name: v.vendor_name, id: v.id }))
+      const fromInventory = [...new Set(
+        (inventoryRes.data || []).map(i => i.supplier).filter(Boolean)
+      )].map(s => ({ name: s, id: null }))
+
+      // Merge, dedup by name
+      const seen = new Set(fromVendors.map(v => v.name.toLowerCase()))
+      const merged = [...fromVendors]
+      for (const item of fromInventory) {
+        if (!seen.has(item.name.toLowerCase())) {
+          merged.push(item)
+          seen.add(item.name.toLowerCase())
+        }
+      }
+
+      return merged.slice(0, 10)
     },
     (item) => item.name,
     (item) => {
