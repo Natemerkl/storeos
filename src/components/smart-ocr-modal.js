@@ -441,11 +441,10 @@ function attachEventListeners(modal, data, inventory, customers, accounts = [], 
         .from('expenses')
         .select('vendor')
         .eq('store_id', currentStore.id)
-        .not('vendor', 'is', null)
         .ilike('vendor', `%${query}%`)
-        .limit(10)
+        .limit(50)
       const uniqueVendors = [...new Set(data?.map(e => e.vendor).filter(Boolean))]
-      return uniqueVendors.map(v => ({ vendor: v }))
+      return uniqueVendors.slice(0, 10).map(v => ({ vendor: v }))
     },
     (item) => item.vendor,
     (item) => {
