@@ -418,10 +418,10 @@ export async function render(container) {
       // Handle Edge Function errors
       if (ocrError) throw new Error(ocrError.message || 'OCR failed')
 
-      // Handle AI_PARSE_ERROR (422 response)
-      if (ocrResult?.error_code === 'AI_PARSE_ERROR') {
+      // Handle OCR_PARSE_ERROR or AI_PARSE_ERROR (422 response)
+      if (ocrResult?.error_code === 'OCR_PARSE_ERROR' || ocrResult?.error_code === 'AI_PARSE_ERROR') {
         OCRNotifications.showError(
-          'The handwriting was too difficult for the AI to format. Please retake a clearer photo.',
+          ocrResult?.message || 'The receipt couldn\'t be formatted properly. Please try a clearer photo.',
           () => {
             navigate('/ocr-scanner')
           }

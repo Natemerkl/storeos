@@ -84,35 +84,21 @@ function parseAmount(s: string): number {
 
 // Is a token a pure number (with optional Ethiopian thousands comma)?
 function isNumeric(s: string): boolean {
-  // Strip trailing punctuation/artifacts common in handwritten numbers before testing
-  const clean = s.trim().replace(/[>)\.\-_]+$/, '')
-  return /^[\d,]+(\.\d+)?$/.test(clean) && clean.length > 0
+  return /^[\d,]+(\.\d+)?$/.test(s.trim())
 }
 
 // ── Step 1: Spatial row reconstruction ───────────────────────────────────────
 // Groups Vision API word tokens by Y-coordinate proximity into rows,
 // then sorts words within each row by X (left → right).
 
-function groupIntoRows(wordAnnotations: any[], yTolerance = 45): Row[] {
-  // Helper to detect if a word is just pure noise/punctuation
-  const isNoise = (text: string) => /^[\-\_\.\,\:\;\>\<\~]+$/.test(text.trim())
-
+function groupIntoRows(wordAnnotations: any[], yTolerance = 15): Row[] {
   const tokens: WordToken[] = wordAnnotations
     .filter(w => w.description && w.boundingPoly?.vertices?.length >= 4)
-    // Filter out the noise tokens right away!
-    .filter(w => !isNoise(w.description as string))
-    .map(w => {
-      const vertices = w.boundingPoly.vertices
-      // Use center-Y of the bounding box instead of top-left corner
-      // to handle tall capitals and slanted handwriting more robustly
-      const ys = vertices.map((v: any) => v.y || 0)
-      const centerY = (Math.min(...ys) + Math.max(...ys)) / 2
-      return {
-        text: w.description as string,
-        x: (vertices[0].x as number) || 0,
-        y: centerY,
-      }
-    })
+    .map(w => ({
+      text: w.description as string,
+      x: (w.boundingPoly.vertices[0].x as number) || 0,
+      y: (w.boundingPoly.vertices[0].y as number) || 0,
+    }))
     .sort((a, b) => a.y - b.y)
 
   const rows: Row[] = []
@@ -121,8 +107,6 @@ function groupIntoRows(wordAnnotations: any[], yTolerance = 45): Row[] {
     const existing = rows.find(r => Math.abs(r.y - token.y) <= yTolerance)
     if (existing) {
       existing.words.push(token)
-      // Recalculate row average Y to track slant drift across the line
-      existing.y = existing.words.reduce((s, w) => s + w.y, 0) / existing.words.length
     } else {
       rows.push({ y: token.y, words: [token], text: "" })
     }
@@ -142,7 +126,7 @@ function groupIntoRows(wordAnnotations: any[], yTolerance = 45): Row[] {
 // Handwritten receipts often place price/total columns slightly lower on the page
 // than the product name, causing the spatial grouper to split one item across two rows.
 // e.g. ["Klonze", "10"] row + ["3500", "35,000"] row → ["Klonze", "10", "3500", "35,000"]
-function mergeOrphanNumericRows(rows: Row[], maxYGap = 65): Row[] {
+function mergeOrphanNumericRows(rows: Row[], maxYGap = 35): Row[] {
   const result: Row[] = []
 
   for (let i = 0; i < rows.length; i++) {
@@ -195,51 +179,51 @@ const CUSTOMER_LABEL_KEYWORDS = ["name", "targ", "place", "nom", "customer", "cl
 function extractCustomerHeader(rows: Row[]): {
   name: string | null; targa: string | null; place: string | null
 } {
-  // 1. First, find where the actual line items start so we don't accidentally grab them
-  let firstDataRowIdx = rows.length
-  for (let i = 0; i < rows.length; i++) {
-    // If a row has 2 or more numbers, it's definitely a line item, stop searching!
-    const numCount = rows[i].words.filter(w => isNumeric(w.text)).length
-    if (numCount >= 2) {
-      firstDataRowIdx = i
-      break
+  // Strategy 1: Find label row ("Name targ Place") then look ahead up to 5 rows
+  for (let i = 0; i < rows.length - 1; i++) {
+    const lower = rows[i].text.toLowerCase()
+    const labelHits = CUSTOMER_LABEL_KEYWORDS.filter(kw => lower.includes(kw)).length
+    if (labelHits >= 2) {
+      for (let j = i + 1; j <= Math.min(i + 5, rows.length - 1); j++) {
+        const tokens = rows[j].words.map(w => w.text)
+        const targaIdx = tokens.findIndex(t => /^\d{4,6}$/.test(t))
+        if (targaIdx > 0) {
+          return {
+            name:  tokens.slice(0, targaIdx).join(" ").trim() || null,
+            targa: tokens[targaIdx],
+            place: tokens.slice(targaIdx + 1).join(" ").trim() || null,
+          }
+        }
+      }
     }
   }
 
-  // 2. Isolate the "Header Zone" (max the top 4 rows, but strictly BEFORE the line items)
-  const headerRows = rows.slice(0, Math.min(4, firstDataRowIdx))
+  // Strategy 2: Find any row matching [text+] [4-6 digit targa] [text+] with exactly 1 numeric
+  // This handles OCR misreads of the label row and non-standard receipt layouts
+  for (const row of rows) {
+    const tokens  = row.words.map(w => w.text)
+    const lower   = row.text.toLowerCase()
+    // Must not be an item header row
+    if (ITEM_HEADER_KEYWORDS.filter(kw => lower.includes(kw)).length >= 2) continue
+    // Must not be a skip-keyword row
+    if (ITEM_SKIP_KEYWORDS.some(kw => lower.includes(kw))) continue
 
-  // 3. Pool EVERY single word from the header zone into one flat array left-to-right, top-to-bottom
-  const headerTokens = headerRows.flatMap(r => r.words.map(w => w.text))
+    const numericTokens = tokens.filter(t => isNumeric(t))
+    const textTokens    = tokens.filter(t => !isNumeric(t))
 
-  // 4. Scan the pool to find the Targa
-  let targaIdx = -1
-  let cleanTarga = ""
-  
-  for (let i = 0; i < headerTokens.length; i++) {
-    // Clean trailing squiggles or dots from handwriting before testing
-    const cleanStr = headerTokens[i].trim().replace(/[\>\)\.\-\_]+$/, '')
-    
-    // If it's exactly 4 to 6 digits, we found our Targa!
-    if (/^\d{4,6}$/.test(cleanStr)) {
-      targaIdx = i
-      cleanTarga = cleanStr
-      break
+    // Pattern: exactly 1 numeric (the targa) flanked by text on both sides
+    if (numericTokens.length === 1 && textTokens.length >= 2) {
+      const targaIdx = tokens.findIndex(t => /^\d{4,6}$/.test(t))
+      if (targaIdx > 0 && targaIdx < tokens.length - 1) {
+        return {
+          name:  tokens.slice(0, targaIdx).join(" ").trim() || null,
+          targa: tokens[targaIdx],
+          place: tokens.slice(targaIdx + 1).join(" ").trim() || null,
+        }
+      }
     }
   }
 
-  // 5. If we found a Targa, slice the pool
-  if (targaIdx >= 0) {
-    // Everything written BEFORE the Targa is the Customer Name
-    const name = headerTokens.slice(0, targaIdx).join(" ").trim() || null
-    
-    // Everything written AFTER the Targa is the Place
-    const place = headerTokens.slice(targaIdx + 1).join(" ").trim() || null
-
-    return { name, targa: cleanTarga, place }
-  }
-
-  // Fallback if absolutely no 4-6 digit number was found at the top of the page
   return { name: null, targa: null, place: null }
 }
 
@@ -249,14 +233,8 @@ function extractCustomerHeader(rows: Row[]): {
 // Validates column order with: qty × price ≈ total cross-check.
 
 const ITEM_HEADER_KEYWORDS = ["item", "quantity", "price", "total", "qty", "amount", "product", "description"]
-const ITEM_SKIP_KEYWORDS   = [
-  "wezader", "wezider", "wezder", "wzder", "weyder",
-  "terezeder", "terezder", "tewezeder", "tewezder", "terezdr",
-  "transport", "delivery", "driver", "labor",
-  "total", "grand", "subtotal", "sum",
-  "name", "targ", "place",
-  "ወዘደር", "ዊዘደር",
-]
+const ITEM_SKIP_KEYWORDS   = ["wezader", "wezader", "transport", "total", "grand", "subtotal", "sum",
+                               "name", "targ", "place", "delivery", "ወዘደር"]
 
 function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
   items: any[]; headerRowIdx: number
@@ -282,51 +260,46 @@ function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
     // Skip summary / transport / header rows
     if (ITEM_SKIP_KEYWORDS.some(kw => lower.includes(kw))) continue
 
-    // Completely separate text and numbers first
-    const numericTokens: number[] = []
-    const textTokens: string[] = []
-    
+    // Collect numeric and text tokens
+    const numericTokens: Array<{ value: number; idx: number }> = []
+    const leadingText: string[] = []
+    let seenNumber = false
+
     for (let t = 0; t < tokens.length; t++) {
       if (isNumeric(tokens[t])) {
-        numericTokens.push(parseAmount(tokens[t]))
-      } else {
-        textTokens.push(tokens[t])
+        seenNumber = true
+        numericTokens.push({ value: parseAmount(tokens[t]), idx: t })
+      } else if (!seenNumber) {
+        leadingText.push(tokens[t])
       }
     }
 
     // Need at least 2 numerics to qualify as a line item
     if (numericTokens.length < 2) continue
 
-    // All text automatically becomes the description/name
-    // This perfectly handles multi-word names like "Desta Bane" or "200k"
-    let description = textTokens.join(" ").trim()
-    let quantity = 1
-    let unit_price = 0
-    let total = 0
+    let description: string
+    let quantity: number
+    let unit_price: number
+    let total: number
 
     if (manualColumnOrder && manualColumnOrder.length > 0) {
-      // Filter the user's mapping to ONLY look at the number columns they expect
-      const expectedNumberCols = manualColumnOrder.filter(c => 
-        c === "qty" || c === "quantity" || 
-        c === "price" || c === "unit_price" || 
-        c === "amount" || c === "total"
-      )
-
-      // Map the actual numbers found to the expected number columns, in order
-      for (let j = 0; j < Math.min(numericTokens.length, expectedNumberCols.length); j++) {
-        const val = numericTokens[j]
-        const colType = expectedNumberCols[j]
-        
-        if (colType === "qty" || colType === "quantity") quantity = val
-        if (colType === "price" || colType === "unit_price") unit_price = val
-        if (colType === "amount" || colType === "total") total = val
-      }
+      // Use user-corrected column assignments
+      const assigned: Record<string, string> = {}
+      tokens.forEach((t, idx) => {
+        const colType = manualColumnOrder[idx]
+        if (colType && colType !== "ignore") assigned[colType] = t
+      })
+      description = assigned["name"] || assigned["description"] || leadingText.join(" ")
+      quantity    = parseAmount(assigned["qty"] || assigned["quantity"] || "1")
+      unit_price  = parseAmount(assigned["price"] || assigned["unit_price"] || "0")
+      total       = parseAmount(assigned["amount"] || assigned["total"] || "0")
     } else {
-      // Automatic mode: use text/number separation
+      description = leadingText.join(" ").trim()
+
       if (numericTokens.length >= 3) {
-        const n0 = numericTokens[0]
-        const n1 = numericTokens[1]
-        const n2 = numericTokens[numericTokens.length - 1]
+        const n0 = numericTokens[0].value
+        const n1 = numericTokens[1].value
+        const n2 = numericTokens[numericTokens.length - 1].value
 
         // Cross-check: qty × price ≈ total  (within 5% rounding tolerance)
         const crossCheck = (q: number, p: number, tot: number) =>
@@ -343,8 +316,8 @@ function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
       } else {
         // 2 numbers: assume [price, total] with qty = 1
         quantity   = 1
-        unit_price = numericTokens[0]
-        total      = numericTokens[1]
+        unit_price = numericTokens[0].value
+        total      = numericTokens[1].value
       }
     }
 
@@ -359,10 +332,8 @@ function extractLineItems(rows: Row[], manualColumnOrder?: string[]): {
 // ── Step 4: Transport / Wezader extraction ────────────────────────────────────
 
 const TRANSPORT_KEYWORDS = [
-  "wezader", "wezider", "wezder", "wzder", "weyder", "wez", "pudhal",
-  "terezeder", "terezder", "tewezeder", "tewezder", "terezdr",
-  "transport", "delivery", "driver", "labor",
-  "ወዘደር", "ዊዘደር",
+  "wezader", "wezader", "transport", "delivery", "driver",
+  "ወዘደር", "ዊዘደር", "ወዘደር", "wezader", "wezider",
 ]
 
 function extractTransport(rows: Row[]): {
@@ -425,33 +396,30 @@ function extractPaymentBank(rows: Row[]): string | null {
 
 // ── Step 6: Column detection for correction modal ────────────────────────────
 
-function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any[]; needs_review: boolean } {
-  // Scan the next 5 data rows and pick the one with the most tokens
-  // (avoids picking an anomalous fractured row as the column template)
+function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any[] } {
+  // Scan forward from the header row looking for the first genuine item data row:
+  // must have ≥2 numeric tokens and must not match skip keywords (transport, totals, etc.)
   const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0
-  let bestRow: Row | undefined
-  let maxTokens = 0
+  let firstDataRow: Row | undefined
 
-  for (let i = startIdx; i < Math.min(startIdx + 5, rows.length); i++) {
+  for (let i = startIdx; i < rows.length; i++) {
     const row   = rows[i]
     const lower = row.text.toLowerCase()
     if (ITEM_SKIP_KEYWORDS.some(kw => lower.includes(kw))) continue
-    const numCount = row.words.filter(w => isNumeric(w.text)).length
-    if (numCount >= 2 && row.words.length > maxTokens) {
-      bestRow = row
-      maxTokens = row.words.length
+    if (row.words.filter(w => isNumeric(w.text)).length >= 2) {
+      firstDataRow = row
+      break
     }
   }
 
   // Fallback: any row with ≥2 numerics anywhere in the document
-  if (!bestRow) {
-    const candidates = rows.filter(r => r.words.filter(w => isNumeric(w.text)).length >= 2)
-    bestRow = candidates.reduce((best, r) => (!best || r.words.length > best.words.length) ? r : best, undefined as Row | undefined)
+  if (!firstDataRow) {
+    firstDataRow = rows.find(r => r.words.filter(w => isNumeric(w.text)).length >= 2)
   }
 
-  if (!bestRow) return { columns: [], needs_review: false }
+  if (!firstDataRow) return { columns: [] }
 
-  const tokens = bestRow.words.map(w => w.text)
+  const tokens = firstDataRow.words.map(w => w.text)
   const columns: any[] = []
   let nameAdded    = false
   let numericCount = 0
@@ -469,7 +437,7 @@ function buildColumnDetection(rows: Row[], headerRowIdx: number): { columns: any
     columns.push({ index: i, type, sample })
   }
 
-  return { columns, needs_review: columns.length >= 2 }
+  return { columns }
 }
 
 // ── Step 7: Grand total detection ────────────────────────────────────────────
@@ -543,11 +511,6 @@ function parseVisionResponse(response: any, manualColumnOrder?: string[]) {
     match:            detectedTotal > 0 ? Math.abs(calcTotal - detectedTotal) <= 2 : true,
   }
 
-  // Flag column review when math validation fails or items have zero prices
-  if (!validation.match || lineItems.some(i => i.unit_price === 0 && i.total === 0)) {
-    columnDetection.needs_review = true
-  }
-
   return {
     raw_text:        fullText,
     raw_blocks:      allAnnotations.slice(0, 50),
@@ -565,187 +528,6 @@ function parseVisionResponse(response: any, manualColumnOrder?: string[]) {
   }
 }
 
-// ── Gemini Pro Scan ────────────────────────────────────────────────────────────
-// Called when mode === 'pro'. Fetches the image bytes, base64-encodes them, and
-// sends them to Gemini 1.5 Flash with a two-step Chain-of-Thought prompt.
-// Deliberately omits responseMimeType so real CoT reasoning is not suppressed.
-
-function uint8ToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-  return btoa(binary)
-}
-
-// ── Gemini structured output schema ──────────────────────────
-const GeminiSystemPrompt = (userCtx: { products: any[], customers: any[] }) => `
-You are an expert Ethiopian bookkeeping assistant. Extract data from this handwritten receipt into a strict JSON object.
-
-CONTEXT - Use these lists to correct messy handwriting:
-KNOWN PRODUCTS: ${JSON.stringify(userCtx.products.slice(0, 100), null, 0)}
-KNOWN CUSTOMERS: ${JSON.stringify(userCtx.customers.slice(0, 40), null, 0)}
-
---- CRITICAL MASTER TEMPLATE ---
-This receipt follows a STRICT 4-column format. You must read left-to-right across the massive gaps. 
-
-EXAMPLE OF THE EXACT RECEIPT FORMAT YOU ARE LOOKING AT:
-Image Text:
-Aymen       Biretene        14563
-Klenze      15      4350  - 65,250
-200k        10      5000  - 50,000
-Qemeni      10      2300    23,000
-DestaBane   7       1500    10,500
-           tewezeder 500
-Total - 149,250
-
-CORRECT EXTRACTION FOR THIS EXAMPLE:
-- Header -> Name: "Aymen", Place: "Biretene", Targa: "14563"
-- Line 1 -> desc: "Klenze", qty: 15, unit_price: 4350, total: 65250
-- Line 2 -> desc: "200k", qty: 10, unit_price: 5000, total: 50000
-- Line 3 -> desc: "Qemeni", qty: 10, unit_price: 2300, total: 23000
-- Line 4 -> desc: "DestaBane", qty: 7, unit_price: 1500, total: 10500
-- Transport -> amount: 500, worker_note: "tewezeder"
-- Grand Total -> 149250
---------------------------------
-
-RULES YOU MUST FOLLOW:
-1. NEVER split a single row into multiple items. A product row ALWAYS has 4 parts: [Product Name] [Quantity] [Unit Price] [Total].
-2. If you see a number like "1500" sitting alone, it is a PRICE or a TOTAL. It is NEVER a product name.
-3. Words like "tewezeder", "wezader", "terezeder", "labor", or "transport" are TRANSPORT FEES. Put their amount ONLY in the "transport_fee" field. NEVER put them in the line_items array.
-4. MATH ANCHOR: Quantity * Unit Price MUST exactly equal Total.
-
-You MUST return a valid JSON object with these exact keys:
-{
-  "_step_1_raw_transcription": "Transcribe the receipt line-by-line exactly as written.",
-  "vendor": "vendor name or empty string",
-  "date": "YYYY-MM-DD or empty string",
-  "total": <total amount as a number, 0 if not found>,
-  "subtotal": <subtotal before fees, 0 if unknown>,
-  "transport_fee": <transport/delivery/wezader fee amount, 0 if none>,
-  "line_items": [
-    {
-      "description": "product name",
-      "matched_product_id": "id from known products if matched, null if not",
-      "matched_product_name": "corrected product name if matched, null if not",
-      "quantity": <number>,
-      "unit_price": <price per unit>,
-      "total": <quantity * unit_price>
-    }
-  ],
-  "customer_name": "customer name if found, null if not",
-  "matched_customer_id": "id from known customers if matched, null if not",
-  "payment_method": "cash | credit | bank_transfer | telebirr | cbe_birr | null",
-  "notes": "put the targa/plate number or place here if found",
-  "scan_mode": "pro"
-}
-`
-
-async function callGeminiProScan(
-  imageUrl: string,
-  userContext: { products: any[]; customers: any[] },
-  apiKey: string
-) {
-  // 1. Fetch image bytes and encode to base64
-  const imgRes = await fetch(imageUrl)
-  if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`)
-  const buf = await imgRes.arrayBuffer()
-  const b64 = uint8ToBase64(new Uint8Array(buf))
-  const mimeType = imageUrl.toLowerCase().includes('.pdf') ? 'application/pdf' : 'image/webp'
-
-  // 2. Build prompt using the strictly templated schema with few-shot example
-  const prompt = GeminiSystemPrompt(userContext)
-
-  // 3. Call Gemini — NO responseMimeType so CoT reasoning is fully executed
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { text: prompt },
-          { inline_data: { mime_type: mimeType, data: b64 } },
-        ]}],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-      }),
-    }
-  )
-
-  if (!res.ok) throw new Error(`Gemini API error: ${await res.text()}`)
-  const gData = await res.json()
-  const rawText: string = gData.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-
-  // 5. Extract the first JSON object (model may prefix with reasoning text)
-  let g: any
-  try {
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return new Response(JSON.stringify({
-        success: false,
-        error_code: 'AI_PARSE_ERROR',
-        message: "The AI couldn't format the receipt properly."
-      }), { status: 422, headers: { 'Content-Type': 'application/json' } })
-    }
-    g = JSON.parse(jsonMatch[0])
-  } catch (parseError) {
-    return new Response(JSON.stringify({
-      success: false,
-      error_code: 'AI_PARSE_ERROR',
-      message: "The AI couldn't format the receipt properly."
-    }), { status: 422, headers: { 'Content-Type': 'application/json' } })
-  }
-
-  // 6. Normalise line items — preserve matched_product_id / matched_product_name
-  const lineItems = (g.line_items || []).map((it: any) => ({
-    description:          String(it.description || ''),
-    matched_product_id:   it.matched_product_id   || null,
-    matched_product_name: it.matched_product_name || null,
-    quantity:             Math.max(Number(it.quantity)  || 1, 0.001),
-    unit_price:           Number(it.unit_price) || 0,
-    total:                Number(it.total)      || 0,
-  }))
-
-  const itemsTotal      = lineItems.reduce((s: number, i: any) => s + i.total, 0)
-  const transportAmount = Number(g.transport_fee) || 0
-  const grandTotal      = Number(g.total) || (itemsTotal + transportAmount)
-
-  // Determine targa vs place from the free-form notes field
-  const notesStr       = String(g.notes || '').trim()
-  const looksLikeTarga = notesStr.length > 0 &&
-    (/^\d{4,8}$/.test(notesStr) || /^[A-Z]{1,3}\d{4,6}$/i.test(notesStr))
-  const targa = looksLikeTarga ? notesStr : null
-  const place = looksLikeTarga ? null     : (notesStr || null)
-
-  return {
-    raw_text:        String(g._step_1_raw_transcription || ''),
-    raw_blocks:      [],
-    customer_header: {
-      name:  g.customer_name || null,
-      targa: targa,
-      place: place,
-    },
-    transport: {
-      amount:      transportAmount > 0 ? transportAmount : null,
-      worker_note: '',
-      detected:    transportAmount > 0,
-    },
-    payment_bank:  g.payment_method || null,
-    validation: {
-      items_total:      itemsTotal,
-      transport_amount: transportAmount,
-      detected_total:   grandTotal,
-      match:            true,
-    },
-    parsed_data: {
-      vendor:           g.vendor || '',
-      date:             g.date   || '',
-      total:            grandTotal,
-      scan_mode:        'pro',
-      line_items:       lineItems,
-      column_detection: { columns: [], needs_review: false },
-    },
-  }
-}
-
 // ── Edge Function handler ─────────────────────────────────────────────────────
 
 serve(async (req: Request) => {
@@ -755,66 +537,46 @@ serve(async (req: Request) => {
 
   try {
     const body = await req.json()
-    const { imageUrl, manual_column_order, mode, userContext } = body
+    const { imageUrl, manual_column_order } = body
     if (!imageUrl) throw new Error("imageUrl is required")
 
+    const serviceAccount = JSON.parse(Deno.env.get("GOOGLE_SERVICE_ACCOUNT") || "")
+    const accessToken    = await getGoogleAccessToken(serviceAccount)
+
+    const visionRes = await fetch(
+      "https://vision.googleapis.com/v1/images:annotate",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type":  "application/json",
+        },
+        body: JSON.stringify({
+          requests: [{
+            image:    { source: { imageUri: imageUrl } },
+            features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+          }],
+        }),
+      }
+    )
+
+    if (!visionRes.ok) {
+      const err = await visionRes.text()
+      throw new Error(`Vision API error: ${err}`)
+    }
+
+    const visionData = await visionRes.json()
+    
+    // Gracefully handle parsing errors
     let parsed
-
-    if (mode === 'pro') {
-      const geminiKey = Deno.env.get("GEMINI_API_KEY")
-      if (!geminiKey) {
-        throw new Error("GEMINI_API_KEY is not configured for Pro Scan")
-      }
-      if (geminiKey.trim() === "") {
-        throw new Error("GEMINI_API_KEY is empty for Pro Scan")
-      }
-      parsed = await callGeminiProScan(
-        imageUrl,
-        userContext || { products: [], customers: [] },
-        geminiKey
-      )
-    } else {
-      const serviceAccountEnv = Deno.env.get("GOOGLE_SERVICE_ACCOUNT")
-      if (!serviceAccountEnv) {
-        throw new Error("GOOGLE_SERVICE_ACCOUNT is not configured for Standard Scan")
-      }
-      if (serviceAccountEnv.trim() === "") {
-        throw new Error("GOOGLE_SERVICE_ACCOUNT is empty for Standard Scan")
-      }
-      
-      let serviceAccount
-      try {
-        serviceAccount = JSON.parse(serviceAccountEnv)
-      } catch (parseErr) {
-        throw new Error("GOOGLE_SERVICE_ACCOUNT is not valid JSON")
-      }
-      
-      const accessToken = await getGoogleAccessToken(serviceAccount)
-
-      const visionRes = await fetch(
-        "https://vision.googleapis.com/v1/images:annotate",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${accessToken}`,
-            "Content-Type":  "application/json",
-          },
-          body: JSON.stringify({
-            requests: [{
-              image:    { source: { imageUri: imageUrl } },
-              features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
-            }],
-          }),
-        }
-      )
-
-      if (!visionRes.ok) {
-        const err = await visionRes.text()
-        throw new Error(`Vision API error: ${err}`)
-      }
-
-      const visionData = await visionRes.json()
+    try {
       parsed = parseVisionResponse(visionData, manual_column_order)
+    } catch (parseError: any) {
+      return new Response(JSON.stringify({
+        success: false,
+        error_code: 'OCR_PARSE_ERROR',
+        message: "The receipt couldn't be formatted properly. Please try a clearer photo."
+      }), { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     return new Response(JSON.stringify(parsed), {
@@ -823,30 +585,8 @@ serve(async (req: Request) => {
 
   } catch (err: any) {
     console.error("OCR proxy error:", err)
-    console.error("Error stack:", err.stack)
-    
-    // Try to log request body if available, but don't crash if it fails
-    try {
-      const body = await req.clone().json()
-      console.error("Request body received:", JSON.stringify(body, null, 2))
-    } catch (bodyErr) {
-      console.error("Could not log request body:", bodyErr.message)
-    }
-    
-    // Add more specific error context
-    let errorMessage = err.message
-    if (err.message.includes("GOOGLE_SERVICE_ACCOUNT")) {
-      errorMessage = "Google Vision API not configured: GOOGLE_SERVICE_ACCOUNT environment variable is missing or invalid"
-    } else if (err.message.includes("GEMINI_API_KEY")) {
-      errorMessage = "Gemini API not configured: GEMINI_API_KEY environment variable is missing"
-    } else if (err.message.includes("Vision API error")) {
-      errorMessage = `Google Vision API error: ${err.message}`
-    } else if (err.message.includes("Gemini API error")) {
-      errorMessage = `Gemini API error: ${err.message}`
-    }
-    
     return new Response(
-      JSON.stringify({ error: errorMessage, details: err.message }),
+      JSON.stringify({ error: err.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     )
   }
