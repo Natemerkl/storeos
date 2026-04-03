@@ -161,6 +161,7 @@ async function loadSales() {
       transport_fee,
       delivery_place,
       targa,
+      plate_number,
       payment_bank,
       cash_accounts(account_name),
       customers(name, phone),
@@ -415,13 +416,14 @@ function renderSales() {
       }
       
       // Delivery Information Section
-      if (sale.targa || sale.delivery_place || sale.transport_fee && parseFloat(sale.transport_fee) > 0) {
+      const plateNumber = sale.plate_number || sale.targa
+      if (plateNumber || sale.delivery_place || sale.transport_fee && parseFloat(sale.transport_fee) > 0) {
         html += '<div style="background:var(--bg-elevated);border-radius:8px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border)">'
         html += '<div style="font-weight:600;margin-bottom:0.75rem;color:var(--dark)">Delivery Information</div>'
         html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">'
         
-        if (sale.targa) {
-          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Plate Number</div><div style="font-weight:500">' + sale.targa + '</div></div>'
+        if (plateNumber) {
+          html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Plate Number</div><div style="font-weight:500">' + plateNumber + '</div></div>'
         }
         if (sale.delivery_place) {
           html += '<div><div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px">Delivery Place</div><div style="font-weight:500">' + sale.delivery_place + '</div></div>'
