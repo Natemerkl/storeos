@@ -438,17 +438,16 @@ function attachEventListeners(modal, data, inventory, customers, accounts = [], 
       const { currentStore } = appStore.getState()
       if (!currentStore?.id || !query) return []
       const { data } = await supabase
-        .from('expenses')
-        .select('vendor')
+        .from('vendors')
+        .select('id, name')
         .eq('store_id', currentStore.id)
-        .ilike('vendor', `%${query}%`)
-        .limit(50)
-      const uniqueVendors = [...new Set(data?.map(e => e.vendor).filter(Boolean))]
-      return uniqueVendors.slice(0, 10).map(v => ({ vendor: v }))
+        .ilike('name', `%${query}%`)
+        .limit(10)
+      return data || []
     },
-    (item) => item.vendor,
+    (item) => item.name,
     (item) => {
-      modal.querySelector('#ocr-vendor').value = item.vendor
+      modal.querySelector('#ocr-vendor').value = item.name
     }
   )
 
